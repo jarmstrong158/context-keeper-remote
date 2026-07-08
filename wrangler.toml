@@ -11,7 +11,7 @@ compatibility_flags = ["nodejs_compat"]
 [[d1_databases]]
 binding = "DB"
 database_name = "context-keeper"
-database_id = "PASTE_D1_ID_HERE"
+database_id = "4ed77245-807b-4fa8-a50d-c71cfd3c704d"
 
 # AUTH_TOKEN is NOT declared here. It is a secret, set by the operator in the
 # dashboard: Worker -> Settings -> Variables and Secrets -> add AUTH_TOKEN.
