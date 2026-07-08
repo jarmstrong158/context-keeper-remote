@@ -2,9 +2,12 @@ name: Deploy
 
 # Deploy to Cloudflare Workers on every push to main. Tests run first; if they
 # fail the job stops before the deploy step ever runs.
+# Documentation-only pushes (Markdown) are skipped — they don't change the Worker.
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "**.md"
 
 jobs:
   deploy:
