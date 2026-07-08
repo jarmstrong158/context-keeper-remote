@@ -2,6 +2,8 @@
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/jarmstrong158/context-keeper-remote)
 
+_Part of the [xylem](https://github.com/jarmstrong158/xylem) stack._
+
 A remote [MCP](https://modelcontextprotocol.io) server on Cloudflare Workers that
 exposes context-keeper's rationale store (decisions, pipelines, constraints) over
 Streamable HTTP. It works as a **claude.ai custom connector**, including on mobile,
@@ -233,3 +235,10 @@ test/                    vitest suite (local workerd D1, no network)
 | `it's necessary to set a CLOUDFLARE_API_TOKEN environment variable` | Deploy secrets missing | Add both GitHub repo secrets. |
 | `No route for that URI [code: 7000]` / `object identifier is invalid [code: 7003]` | API token lacks Workers permission, or wrong `CLOUDFLARE_ACCOUNT_ID` | Use an "Edit Cloudflare Workers" token; confirm the account id. |
 | Deploys succeed but every call returns `404` | Worker `AUTH_TOKEN` not set, or the URL's token doesn't match it | Set/verify `AUTH_TOKEN` in the Cloudflare dashboard. |
+
+---
+
+## Related
+
+- [context-keeper](https://github.com/jarmstrong158/context-keeper) — the local stdio original this Worker hosts as a remote transport.
+- [xylem](https://github.com/jarmstrong158/xylem) — the stack this is part of.
