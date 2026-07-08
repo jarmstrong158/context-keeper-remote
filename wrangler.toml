@@ -1,0 +1,18 @@
+name = "context-keeper-remote"
+main = "src/index.ts"
+compatibility_date = "2025-06-01"
+compatibility_flags = ["nodejs_compat"]
+
+# --- D1 binding -------------------------------------------------------------
+# The operator creates this database in the Cloudflare dashboard
+# (Storage & Databases -> D1 -> Create). Copy its Database ID here.
+# Local vitest ignores database_id and uses an in-memory workerd D1, so the
+# placeholder is fine for development and CI.
+[[d1_databases]]
+binding = "DB"
+database_name = "context-keeper"
+database_id = "4ed77245-807b-4fa8-a50d-c71cfd3c704d"
+
+# AUTH_TOKEN is NOT declared here. It is a secret, set by the operator in the
+# dashboard: Worker -> Settings -> Variables and Secrets -> add AUTH_TOKEN.
+# Keeping it out of source and out of GitHub is intentional.

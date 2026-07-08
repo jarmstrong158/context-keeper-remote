@@ -1,0 +1,23 @@
+{
+  "name": "context-keeper-remote",
+  "version": "1.0.0",
+  "description": "Remote MCP server on Cloudflare Workers exposing context-keeper's rationale store over Streamable HTTP.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "smoke": "node scripts/smoke-test.mjs"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.18.2",
+    "@cloudflare/workers-types": "^5.20260708.1",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.108.0"
+  }
+}

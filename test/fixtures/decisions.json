@@ -1,0 +1,18 @@
+[
+  {
+    "id": "dec-001",
+    "summary": "Use D1 instead of KV for the store",
+    "problem": "Two writers (desktop + mobile) clobber whole-file JSON writes",
+    "rationale": "D1 gives row-level writes and WHERE clauses for structured query",
+    "what_we_tried": ["KV read-modify-write", "single-writer lock"],
+    "tradeoffs": "SQL surface to maintain",
+    "tags": ["storage", "architecture"]
+  },
+  {
+    "id": "dec-002",
+    "summary": "Secret-path auth for v1",
+    "problem": "claude.ai connectors don't reliably send custom bearer headers",
+    "why_chosen": "Route POST /mcp/:token, URL is the credential",
+    "tags": ["auth"]
+  }
+]
