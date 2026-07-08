@@ -1,0 +1,14 @@
+[
+  {
+    "id": "con-001",
+    "rule": "Never call api.cloudflare.com from the build container",
+    "reason": "Egress is allowlisted to npm + GitHub only; deploys go via Workers Builds",
+    "tags": ["ops"]
+  },
+  {
+    "id": "con-005",
+    "rule": "Schema is applied by the Worker at runtime, no manual SQL step",
+    "reason": "Operator is phone-only",
+    "status": "active"
+  }
+]
