@@ -3,16 +3,29 @@ main = "src/index.ts"
 compatibility_date = "2025-06-01"
 compatibility_flags = ["nodejs_compat"]
 
-# --- D1 binding -------------------------------------------------------------
-# The operator creates this database in the Cloudflare dashboard
-# (Storage & Databases -> D1 -> Create). Copy its Database ID here.
-# Local vitest ignores database_id and uses an in-memory workerd D1, so the
-# placeholder is fine for development and CI.
+# --- D1 binding (default env) ----------------------------------------------
+# No `database_id` on purpose. This is what the "Deploy to Cloudflare" button
+# and `wrangler dev`/`wrangler deploy` (without --env) read. With the id
+# omitted, Cloudflare AUTO-PROVISIONS a fresh D1 database in the deploying
+# user's account and binds it here (auto-provisioning: wrangler >= 4.45.0).
+# So a one-click self-hoster gets their own database with no manual setup.
+# Local vitest also uses this binding, backed by an in-memory workerd D1.
 [[d1_databases]]
+binding = "DB"
+database_name = "context-keeper"
+
+# --- production env (this repo's own CI) -----------------------------------
+# The maintainer's GitHub Actions deploy runs `wrangler deploy --env production`
+# and pins the existing D1 by id, so CI keeps deploying to the same database and
+# the same Worker name/URL. Self-hosters never use this env.
+[env.production]
+name = "context-keeper-remote"
+
+[[env.production.d1_databases]]
 binding = "DB"
 database_name = "context-keeper"
 database_id = "4ed77245-807b-4fa8-a50d-c71cfd3c704d"
 
-# AUTH_TOKEN is NOT declared here. It is a secret, set by the operator in the
-# dashboard: Worker -> Settings -> Variables and Secrets -> add AUTH_TOKEN.
-# Keeping it out of source and out of GitHub is intentional.
+# AUTH_TOKEN is NOT declared here. It is a secret, set in the dashboard:
+# Worker -> Settings -> Variables and Secrets -> add AUTH_TOKEN. Keeping it out
+# of source and out of Git is intentional; the connector URL embeds it.

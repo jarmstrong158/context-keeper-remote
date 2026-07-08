@@ -1,14 +1,23 @@
 # context-keeper-remote
 
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/jarmstrong158/context-keeper-remote)
+
 A remote [MCP](https://modelcontextprotocol.io) server on Cloudflare Workers that
 exposes context-keeper's rationale store (decisions, pipelines, constraints) over
 Streamable HTTP. It works as a **claude.ai custom connector**, including on mobile,
-so your project's decisions and constraints are available from any Claude session
-without your PC being on.
+so your project's decisions and constraints are available from any Claude session —
+no PC left running, no tunnel.
 
-**Live deployment:** `https://context-keeper-remote.jarmstrong158.workers.dev`
+**Self-host your own copy in a few clicks with the button above** — Cloudflare
+copies this repo into your GitHub account, creates a fresh D1 database for you, and
+deploys the Worker. Then you add one secret and paste a URL into Claude. Full
+walkthrough below; every step is a click, no command line anywhere.
 
-## Why it's built this way
+> The maintainer's own instance runs at
+> `https://context-keeper-remote.jarmstrong158.workers.dev`. Yours will be at your
+> own subdomain after you deploy.
+
+### Why it's built this way
 
 - **Worker, not tunnel** — no "PC must be on" dependency.
 - **D1, not KV** — row-level writes and `WHERE` queries; two writers (desktop +
@@ -16,118 +25,104 @@ without your PC being on.
 - **Stateless handler, no Durable Objects** — the tools are stateless RPCs against
   D1, so the Worker runs on the Cloudflare **free plan**.
 - **Secret-path auth** — claude.ai custom connectors don't reliably send custom
-  bearer headers, so the token is the last path segment of the URL. The URL itself
-  is the credential.
-- **Self-migrating** — the Worker creates its own D1 schema at runtime (idempotent
-  `CREATE TABLE IF NOT EXISTS`, run once per isolate). There is **no manual SQL
-  step**.
+  bearer headers, so the token is the last path segment of the URL. The URL is the
+  credential.
+- **Self-migrating** — the Worker creates its own D1 schema at runtime, so a
+  brand-new empty database needs **no manual SQL** (verified by a cold-start test).
 
 ---
 
-## Two different sets of credentials (read this first)
+## Self-host it (one-click, no command line)
 
-This trips people up. There are **two** unrelated groups of secrets:
+### Step 1 — Click "Deploy to Cloudflare"
 
-| Secret | Lives in | Purpose |
-| --- | --- | --- |
-| `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | **GitHub** repo → Settings → Secrets and variables → Actions | Let GitHub Actions **deploy** the Worker to Cloudflare. |
-| `AUTH_TOKEN` | **Cloudflare** dash → Worker → Settings → Variables and Secrets | Guards the running Worker. It's the token in the connector URL. |
+Click the **Deploy to Cloudflare** button at the top of this page. Cloudflare will:
 
-The GitHub ones are for *shipping the code*. The Cloudflare one is what *callers
-authenticate with*. They are not interchangeable.
+1. Ask you to authorize GitHub and pick an account — it **copies this repo into
+   your GitHub account** (you get your own repo).
+2. **Automatically create a new D1 database** in your Cloudflare account and bind it
+   to the Worker. (This works because the Worker's config declares the database
+   binding without a hard-coded id, so Cloudflare provisions a fresh one for you.)
+3. Set up **Workers Builds** so every push to your new repo redeploys automatically.
+4. Build and deploy the Worker.
 
----
+When it finishes, your Worker is live at
+`https://context-keeper-remote.<your-subdomain>.workers.dev`. Note that URL — you'll
+need it in Step 3. (You can always find it under **Workers & Pages** in the
+dashboard.)
 
-## First-time setup
+> Nothing to configure in the repo, and **no SQL to run** — the database starts
+> empty and the Worker creates its tables on the first request.
 
-Everything is doable from a phone: the Cloudflare dashboard, the GitHub web UI, and
-claude.ai. You never need a terminal.
+### Step 2 — Add the `AUTH_TOKEN` secret (Cloudflare dashboard)
 
-### 1. Create the D1 database
+The Worker refuses every request until it has an auth token, so set one:
 
-Cloudflare dashboard → **Storage & Databases → D1 → Create database**.
+1. Cloudflare dashboard → **Workers & Pages** → your **context-keeper-remote**
+   Worker.
+2. **Settings** → **Variables and Secrets** → **Add**.
+3. Type: **Secret**. Name: `AUTH_TOKEN`. Value: a long random string (32+ characters
+   — treat it like a password). Save/Deploy.
 
-- Name it (e.g. `context-keeper`).
-- Open it and **copy the Database ID**.
-- Put that ID into `wrangler.toml` (edit on GitHub with the pencil icon, commit to
-  `main`):
+That value is your connector's password. Keep it somewhere safe; you'll paste it in
+the next step.
 
-  ```toml
-  [[d1_databases]]
-  binding = "DB"
-  database_name = "context-keeper"
-  database_id = "your-real-id-here"   # currently: 4ed77245-807b-4fa8-a50d-c71cfd3c704d
-  ```
+<details>
+<summary>Also deploying the companion <code>agentsync-remote</code> worker?</summary>
 
-  You do **not** run any SQL — the Worker creates its tables on the first request.
+`agentsync-remote` uses the same `AUTH_TOKEN` scheme, and **additionally** needs, in
+*its* Worker's **Variables and Secrets**:
 
-### 2. Set the Worker's `AUTH_TOKEN` (Cloudflare)
+- a **Secret** named `GH_PAT` — a GitHub personal access token, and
+- a **Variable** named `REPO` — set to the `owner/repo` it should sync.
 
-Your Worker → **Settings → Variables and Secrets → Add** a **Secret**:
+Those two do **not** apply to context-keeper-remote (this repo) — it only needs
+`AUTH_TOKEN`. See the `agentsync-remote` README for its specifics.
+</details>
 
-- Name: `AUTH_TOKEN`
-- Value: a long random string (treat it like a password — 32+ random characters).
+### Step 3 — Add the custom connector in claude.ai
 
-Until this is set, **every request returns `404`** — the Worker refuses to
-authenticate against an empty token, on purpose.
+1. claude.ai → **Settings** → **Connectors** → **Add custom connector**.
+2. Paste your Worker URL with the token as the final path segment:
 
-### 3. Add the deploy credentials (GitHub)
+   ```
+   https://context-keeper-remote.<your-subdomain>.workers.dev/mcp/<AUTH_TOKEN>
+   ```
 
-GitHub repo → **Settings → Secrets and variables → Actions → New repository
-secret**. Add both (names must match exactly, they're case-sensitive):
+   Replace `<your-subdomain>` with your Worker's subdomain (Step 1) and
+   `<AUTH_TOKEN>` with the exact value you set (Step 2).
+3. Save. The tools (`record_decision`, `get_context`, `query_entries`, …) are now
+   available in your Claude sessions.
 
-- `CLOUDFLARE_ACCOUNT_ID` — your account id
-  (`d97f8b6f83ced8ffc5e4a2faf9501524`; it's the first path segment of any
-  dashboard URL).
-- `CLOUDFLARE_API_TOKEN` — a Cloudflare API token with **Account → Workers
-  Scripts → Edit** permission on that account. The **"Edit Cloudflare Workers"**
-  token template covers it. (A token that lacks Workers permission fails the deploy
-  with `No route for that URI [code: 7000]`.)
+**Check it works:** ask Claude to call `get_project_summary`. If it answers, the
+whole chain (deploy → auto-provisioned D1 → auto-migration → auth) is working.
 
-### 4. Deploy
+### Step 4 — Migrate existing local data (optional)
 
-Deployment is a **GitHub Actions** workflow (`.github/workflows/deploy.yml`):
-every push to `main` runs the test suite and, only if it passes, runs
-`wrangler deploy`. So just push to `main` (steps 1 and 3 already do that by
-committing) and watch the **Actions** tab. A green run means the Worker is live at
-`https://context-keeper-remote.<your-subdomain>.workers.dev`.
-
-### 5. Add the connector in claude.ai
-
-claude.ai → **Settings → Connectors → Add custom connector**. Use the live URL with
-the `AUTH_TOKEN` (from step 2) as the final path segment:
-
-```
-https://context-keeper-remote.jarmstrong158.workers.dev/mcp/<AUTH_TOKEN>
-```
-
-The tools (`record_decision`, `get_context`, `query_entries`, …) are now available
-in your Claude sessions. A good first call is `get_project_summary` — if it
-answers, the whole chain (deploy + D1 auto-migration + auth) works.
-
-### 6. Migrate your local store (optional)
-
-If you already have local context-keeper data, open any Claude session with the
-connector enabled and ask it to call **`import_entries`**, pasting the contents of
-each file:
+If you already run local context-keeper, ask Claude (with the connector enabled) to
+call **`import_entries`**, pasting each file's contents:
 
 - `decisions.json` → `import_entries(project, kind="decision", entries=[...])`
 - `pipelines.json` → `import_entries(project, kind="pipeline", entries=[...])`
 - `constraints.json` → `import_entries(project, kind="constraint", entries=[...])`
 
-Incoming `id`s are preserved. If an id already exists it's reported, never
-overwritten.
+Incoming ids are preserved; existing ids are reported, never overwritten.
 
 ---
 
-## Security note
+## ⚠️ Security: the connector URL is a credential
 
-**The connector URL is the credential.** Anyone with the full
-`…/mcp/<AUTH_TOKEN>` URL can read and write your store. Don't share it or paste it
-where it'll be logged. To **rotate**: change `AUTH_TOKEN` in the Cloudflare
-dashboard (step 2) and update the connector URL in claude.ai (step 5). Requests to
-any other path, or with the wrong token, get a bare `404` with no detail (a valid
-token with a non-POST method gets `405`).
+The URL you paste into Claude **embeds `AUTH_TOKEN`** as its last path segment.
+Anyone who has the full `…/mcp/<AUTH_TOKEN>` URL can read and write your entire
+store. Treat it exactly like a password:
+
+- Don't share it, screenshot it, or paste it anywhere it could be logged.
+- Requests to any other path, or with the wrong token, get a bare `404` with no
+  detail (a valid token used with a non-POST method gets `405`).
+- **To rotate:** change `AUTH_TOKEN` in the Cloudflare dashboard (Step 2). This
+  **immediately invalidates every old URL** — any connector using the previous
+  token starts getting `404`s until you update it in claude.ai (Step 3) with the new
+  value.
 
 ---
 
@@ -148,7 +143,7 @@ Every tool takes an optional `project`; if omitted it falls back to the configur
 | `update_entry` | Merge `patch` fields into an entry's payload; optionally change `status`. |
 | `deprecate_entry` | Mark deprecated, optionally linking `superseded_by`. |
 | `reload_constraints` | Compact list of the active constraints. |
-| `prune_stale` | Delete old deprecated entries (**dry run by default**; pass `dry_run=false` to delete). |
+| `prune_stale` | Delete old deprecated entries (**dry run by default**; pass `dry_run=false`). |
 | `verify_quality` | Flag entries missing rationale-bearing fields. |
 | `export_markdown` | Render entries as a DECISIONS.md-style document. |
 | `import_entries` | Bulk import from the local JSON store format (preserves ids, reports collisions). |
@@ -165,60 +160,57 @@ Every tool takes an optional `project`; if omitted it falls back to the configur
 
 ---
 
-## Deployment pipeline
+## For maintainers / contributors
 
-`.github/workflows/deploy.yml`, triggered on push to `main`:
+Everything above is for self-hosters. This section is for working on the code
+itself.
 
-1. `checkout`
-2. Set up **Node 22** (Wrangler 4.x requires Node ≥ 22)
-3. `npm ci`
-4. `npm test` — the vitest suite. **If tests fail the job stops here and nothing
-   deploys.**
-5. `npx wrangler deploy` — reads `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`
-   from the repo secrets (by name only; values are never printed).
+### Config layout: how one repo serves both the button and CI
 
----
+`wrangler.toml` has two profiles:
 
-## Development
+- **Default (top level)** — the D1 binding is declared **without** a `database_id`.
+  This is what the Deploy button, `wrangler dev`, and the local test suite use. With
+  no id, Cloudflare auto-provisions a fresh database for each self-hoster.
+- **`[env.production]`** — pins the maintainer's real `database_id` and the Worker
+  `name`. The maintainer's CI deploys with `wrangler deploy --env production` so it
+  keeps hitting the same database and the same URL. Self-hosters never touch this
+  env.
 
-Local, no network and no Cloudflare credentials required — tests run against a local
+### Deploy pipeline (maintainer only)
+
+`.github/workflows/deploy.yml` runs on push to `main`, and is gated with
+`if: github.repository == 'jarmstrong158/context-keeper-remote'` so forks (which
+deploy via Workers Builds instead) don't run failing Actions. Steps: checkout →
+Node 22 (Wrangler needs ≥ 22) → `npm ci` → `npm test` → `wrangler deploy --env
+production`. Tests gate the deploy. It reads two GitHub repo secrets,
+`CLOUDFLARE_API_TOKEN` (needs **Workers Scripts: Edit**) and `CLOUDFLARE_ACCOUNT_ID`
+— **distinct** from the Worker's own `AUTH_TOKEN`.
+
+### Local development
+
+No network and no Cloudflare credentials required — tests run against a local
 workerd D1 via `@cloudflare/vitest-pool-workers`. Requires **Node ≥ 22**.
 
 ```bash
 npm install
-npm test          # vitest: migrations, CRUD, id sequencing, mapping, auth, import, ...
+npm test          # vitest: migrations, cold-start, CRUD, id sequencing, auth, import, ...
 npm run typecheck # tsc --noEmit
 ```
-
-Do not run `wrangler deploy` / `wrangler d1` locally in the build environment — that
-happens in CI on push to `main`.
 
 ### Live smoke test
 
 After a deploy, from any machine with network access:
 
 ```bash
-WORKER_URL="https://context-keeper-remote.jarmstrong158.workers.dev/mcp/<AUTH_TOKEN>" \
+WORKER_URL="https://context-keeper-remote.<subdomain>.workers.dev/mcp/<AUTH_TOKEN>" \
   node scripts/smoke-test.mjs
 ```
 
-It runs `initialize → tools/list → record_decision → query_entries` against the live
-worker and prints per-step `ok:` lines.
+Runs `initialize → tools/list → record_decision → query_entries` against the live
+worker.
 
----
-
-## Troubleshooting the deploy
-
-| Symptom in the Actions log | Cause | Fix |
-| --- | --- | --- |
-| `Wrangler requires at least Node.js v22.0.0` | Node < 22 in the workflow | Already set to Node 22 in `deploy.yml`. |
-| `it's necessary to set a CLOUDFLARE_API_TOKEN environment variable` | Deploy secrets missing | Add both GitHub secrets (setup step 3). |
-| `No route for that URI [code: 7000]` / `object identifier is invalid [code: 7003]` | API token lacks Workers permission, or wrong/typo'd `CLOUDFLARE_ACCOUNT_ID` | Use an "Edit Cloudflare Workers" token; confirm the account id. |
-| Connector works in Actions but every call returns `404` | Worker `AUTH_TOKEN` not set, or the URL's token doesn't match it | Set/verify `AUTH_TOKEN` in the Cloudflare dashboard (setup step 2). |
-
----
-
-## Layout
+### Layout
 
 ```
 src/index.ts             fetch handler: token check -> migrations -> MCP dispatch
@@ -227,8 +219,17 @@ src/db.ts                D1 access + runtime migration runner + id generation
 src/entries.ts           payload normalization, insert-with-retry, keyword scoring
 src/tools/*.ts           one module per tool group
 schema.sql               reference copy of the DDL the migration runner embeds
-wrangler.toml            D1 binding (database_id)
-.github/workflows/deploy.yml   test-then-deploy on push to main
+wrangler.toml            default (auto-provision) + [env.production] (pinned) config
+.github/workflows/deploy.yml   test-then-deploy on push to main (maintainer repo)
 scripts/smoke-test.mjs   live JSON-RPC round-trip check
 test/                    vitest suite (local workerd D1, no network)
 ```
+
+### Troubleshooting the maintainer deploy
+
+| Symptom in the Actions log | Cause | Fix |
+| --- | --- | --- |
+| `Wrangler requires at least Node.js v22.0.0` | Node < 22 | Already set to Node 22 in `deploy.yml`. |
+| `it's necessary to set a CLOUDFLARE_API_TOKEN environment variable` | Deploy secrets missing | Add both GitHub repo secrets. |
+| `No route for that URI [code: 7000]` / `object identifier is invalid [code: 7003]` | API token lacks Workers permission, or wrong `CLOUDFLARE_ACCOUNT_ID` | Use an "Edit Cloudflare Workers" token; confirm the account id. |
+| Deploys succeed but every call returns `404` | Worker `AUTH_TOKEN` not set, or the URL's token doesn't match it | Set/verify `AUTH_TOKEN` in the Cloudflare dashboard. |

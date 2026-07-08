@@ -12,6 +12,10 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # Only the maintainer's repo has the Cloudflare deploy secrets. Self-hosters
+    # who arrive via the "Deploy to Cloudflare" button deploy through Workers
+    # Builds, not this workflow, so skip it on forks to avoid failing runs.
+    if: github.repository == 'jarmstrong158/context-keeper-remote'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,11 +33,14 @@ jobs:
       - name: Run tests
         run: npm test
 
-      # Only reached if the test step above succeeded. wrangler reads
-      # CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID from the environment;
-      # they come from repo secrets of the same names and are never printed.
+      # Only reached if the test step above succeeded. Deploy the `production`
+      # environment, which pins the maintainer's D1 database_id (see
+      # wrangler.toml) so CI keeps deploying to the same database and Worker URL.
+      # wrangler reads CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID from the
+      # environment; they come from repo secrets of the same names and are never
+      # printed.
       - name: Deploy to Cloudflare Workers
-        run: npx wrangler deploy
+        run: npx wrangler deploy --env production
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
