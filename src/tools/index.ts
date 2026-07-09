@@ -1,6 +1,11 @@
 import type { ToolDef } from "../mcp";
 import { configTool, getConfigTool, setConfigTool } from "./config";
-import { recordConstraintTool, recordDecisionTool, recordPipelineTool } from "./record";
+import {
+  recordConstraintTool,
+  recordDecisionTool,
+  recordEntryTool,
+  recordPipelineTool,
+} from "./record";
 import { getContextTool, getProjectSummaryTool, queryEntriesTool } from "./retrieve";
 import { deprecateEntryTool, reloadConstraintsTool, updateEntryTool } from "./lifecycle";
 import { exportMarkdownTool, pruneStaleTool, verifyQualityTool } from "./maintenance";
@@ -13,6 +18,7 @@ export const ALL_TOOLS: ToolDef[] = [
   setConfigTool,
   getConfigTool,
   // core
+  recordEntryTool,
   recordDecisionTool,
   recordConstraintTool,
   recordPipelineTool,

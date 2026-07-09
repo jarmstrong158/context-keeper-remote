@@ -133,6 +133,58 @@ describe("record + retrieve per kind", () => {
   });
 });
 
+describe("unified record_entry tool", () => {
+  it("record_entry kind='decision' writes a decision (id + payload)", async () => {
+    const p = project("re-dec");
+    const r = await callTool("record_entry", {
+      project: p, kind: "decision", summary: "via record_entry", tags: ["mcp"],
+    });
+    expect(r.id).toBe("dec-001");
+    expect(r.entry.payload.summary).toBe("via record_entry");
+    // kind must not leak into the stored payload
+    expect(r.entry.payload.kind).toBeUndefined();
+  });
+
+  it("record_entry kind='constraint' and 'pipeline' write the right kinds", async () => {
+    const p = project("re-mix");
+    const c = await callTool("record_entry", { project: p, kind: "constraint", rule: "no DO" });
+    expect(c.id).toBe("con-001");
+    const pipe = await callTool("record_entry", {
+      project: p, kind: "pipeline", name: "deploy", steps: ["push"],
+    });
+    expect(pipe.id).toBe("pipe-001");
+  });
+
+  it("record_entry maps rationale forward just like record_decision", async () => {
+    const p = project("re-rat");
+    const r = await callTool("record_entry", {
+      project: p, kind: "decision", summary: "s", rationale: "legacy",
+    });
+    expect(r.entry.payload.why_chosen).toBe("legacy");
+    expect(r.entry.payload.rationale).toBeUndefined();
+  });
+
+  it("record_entry enforces the per-kind required field", async () => {
+    const p = project("re-bad");
+    const raw = await callToolRaw("record_entry", { project: p, kind: "decision" });
+    expect(raw.result.isError).toBe(true);
+    expect(raw.result.content[0].text).toMatch(/requires 'summary'/);
+  });
+
+  it("record_entry rejects an unknown kind at the schema layer", async () => {
+    const raw = await callToolRaw("record_entry", { kind: "gizmo", summary: "x" });
+    expect(raw.error?.code ?? raw.result?.isError).toBeTruthy();
+  });
+
+  it("record_entry is registered alongside the deprecated record_* aliases", async () => {
+    const { body } = await rpcJson("tools/list", {});
+    const names = body.result.tools.map((t: any) => t.name);
+    for (const n of ["record_entry", "record_decision", "record_constraint", "record_pipeline"]) {
+      expect(names).toContain(n);
+    }
+  });
+});
+
 describe("id sequencing", () => {
   it("increments per project+kind, zero-padded to 3", async () => {
     const p = project("seq");
