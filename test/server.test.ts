@@ -133,6 +133,58 @@ describe("record + retrieve per kind", () => {
   });
 });
 
+describe("unified record_entry tool", () => {
+  it("record_entry kind='decision' writes a decision (id + payload)", async () => {
+    const p = project("re-dec");
+    const r = await callTool("record_entry", {
+      project: p, kind: "decision", summary: "via record_entry", tags: ["mcp"],
+    });
+    expect(r.id).toBe("dec-001");
+    expect(r.entry.payload.summary).toBe("via record_entry");
+    // kind must not leak into the stored payload
+    expect(r.entry.payload.kind).toBeUndefined();
+  });
+
+  it("record_entry kind='constraint' and 'pipeline' write the right kinds", async () => {
+    const p = project("re-mix");
+    const c = await callTool("record_entry", { project: p, kind: "constraint", rule: "no DO" });
+    expect(c.id).toBe("con-001");
+    const pipe = await callTool("record_entry", {
+      project: p, kind: "pipeline", name: "deploy", steps: ["push"],
+    });
+    expect(pipe.id).toBe("pipe-001");
+  });
+
+  it("record_entry maps rationale forward just like record_decision", async () => {
+    const p = project("re-rat");
+    const r = await callTool("record_entry", {
+      project: p, kind: "decision", summary: "s", rationale: "legacy",
+    });
+    expect(r.entry.payload.why_chosen).toBe("legacy");
+    expect(r.entry.payload.rationale).toBeUndefined();
+  });
+
+  it("record_entry enforces the per-kind required field", async () => {
+    const p = project("re-bad");
+    const raw = await callToolRaw("record_entry", { project: p, kind: "decision" });
+    expect(raw.result.isError).toBe(true);
+    expect(raw.result.content[0].text).toMatch(/requires 'summary'/);
+  });
+
+  it("record_entry rejects an unknown kind at the schema layer", async () => {
+    const raw = await callToolRaw("record_entry", { kind: "gizmo", summary: "x" });
+    expect(raw.error?.code ?? raw.result?.isError).toBeTruthy();
+  });
+
+  it("record_entry is registered alongside the deprecated record_* aliases", async () => {
+    const { body } = await rpcJson("tools/list", {});
+    const names = body.result.tools.map((t: any) => t.name);
+    for (const n of ["record_entry", "record_decision", "record_constraint", "record_pipeline"]) {
+      expect(names).toContain(n);
+    }
+  });
+});
+
 describe("id sequencing", () => {
   it("increments per project+kind, zero-padded to 3", async () => {
     const p = project("seq");
@@ -231,6 +283,40 @@ describe("query filters", () => {
 
     const byId = await callTool("query_entries", { project: p, id: "dec-001" });
     expect(byId.count).toBe(1);
+  });
+
+  it("limit caps results and reports total via `matched`", async () => {
+    const p = project("limit");
+    for (let i = 0; i < 5; i++) {
+      await callTool("record_decision", { project: p, summary: `entry ${i}` });
+    }
+    const limited = await callTool("query_entries", { project: p, kind: "decision", limit: 2 });
+    expect(limited.count).toBe(2);
+    expect(limited.matched).toBe(5);
+    expect(limited.results.length).toBe(2);
+    // without a limit, count == matched (existing callers unaffected)
+    const all = await callTool("query_entries", { project: p, kind: "decision" });
+    expect(all.count).toBe(5);
+    expect(all.matched).toBe(5);
+  });
+});
+
+describe("get_project_summary orientation fields", () => {
+  it("returns counts by kind/status, active constraints, recent decisions, and ids", async () => {
+    const p = project("orient");
+    await callTool("record_constraint", { project: p, rule: "no eval" });
+    await callTool("record_decision", { project: p, summary: "first decision" });
+    await callTool("record_decision", { project: p, summary: "second decision" });
+    const s = await callTool("get_project_summary", { project: p });
+    // existing keys preserved
+    expect(s.total).toBe(3);
+    expect(s.by_kind.decision.active).toBe(2);
+    expect(s.by_kind.decision.ids).toContain("dec-001");
+    // additive orientation fields
+    expect(s.active_constraints).toEqual([{ id: "con-001", rule: "no eval" }]);
+    expect(s.recent_decisions.length).toBe(2);
+    expect(s.recent_decisions[0].id).toBe("dec-002"); // most recent first
+    expect(s.recent_decisions[0].summary).toBe("second decision");
   });
 });
 
@@ -377,5 +463,41 @@ describe("default_project via set_config", () => {
     const raw = await callToolRaw("record_constraint", { rule: "orphan" });
     expect(raw.result.isError).toBe(true);
     expect(raw.result.content[0].text).toMatch(/no default_project|No project/i);
+  });
+});
+
+describe("unified config tool", () => {
+  it("config op='set' then op='get' round-trips a value", async () => {
+    const p = project("cfg");
+    await callTool("config", { op: "set", key: "k1", value: "v1", project: p });
+    const got = await callTool("config", { op: "get", key: "k1", project: p });
+    expect(got.value).toBe("v1");
+  });
+
+  it("config op='set' is readable via the get_config alias (shared storage)", async () => {
+    const p = project("via-config");
+    await callTool("config", { op: "set", key: "default_project", value: p });
+    const got = await callTool("get_config", { key: "default_project" });
+    expect(got.value).toBe(p);
+  });
+
+  it("set_config alias is readable via config op='get' (both directions)", async () => {
+    await callTool("set_config", { key: "k2", value: "v2" });
+    const got = await callTool("config", { op: "get", key: "k2" });
+    expect(got.value).toBe("v2");
+  });
+
+  it("config op='set' without value errors", async () => {
+    const raw = await callToolRaw("config", { op: "set", key: "k3" });
+    expect(raw.result.isError).toBe(true);
+    expect(raw.result.content[0].text).toMatch(/requires .*value/i);
+  });
+
+  it("config is registered alongside the deprecated aliases", async () => {
+    const { body } = await rpcJson("tools/list", {});
+    const names = body.result.tools.map((t: any) => t.name);
+    expect(names).toContain("config");
+    expect(names).toContain("get_config");
+    expect(names).toContain("set_config");
   });
 });
