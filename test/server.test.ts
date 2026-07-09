@@ -379,3 +379,39 @@ describe("default_project via set_config", () => {
     expect(raw.result.content[0].text).toMatch(/no default_project|No project/i);
   });
 });
+
+describe("unified config tool", () => {
+  it("config op='set' then op='get' round-trips a value", async () => {
+    const p = project("cfg");
+    await callTool("config", { op: "set", key: "k1", value: "v1", project: p });
+    const got = await callTool("config", { op: "get", key: "k1", project: p });
+    expect(got.value).toBe("v1");
+  });
+
+  it("config op='set' is readable via the get_config alias (shared storage)", async () => {
+    const p = project("via-config");
+    await callTool("config", { op: "set", key: "default_project", value: p });
+    const got = await callTool("get_config", { key: "default_project" });
+    expect(got.value).toBe(p);
+  });
+
+  it("set_config alias is readable via config op='get' (both directions)", async () => {
+    await callTool("set_config", { key: "k2", value: "v2" });
+    const got = await callTool("config", { op: "get", key: "k2" });
+    expect(got.value).toBe("v2");
+  });
+
+  it("config op='set' without value errors", async () => {
+    const raw = await callToolRaw("config", { op: "set", key: "k3" });
+    expect(raw.result.isError).toBe(true);
+    expect(raw.result.content[0].text).toMatch(/requires .*value/i);
+  });
+
+  it("config is registered alongside the deprecated aliases", async () => {
+    const { body } = await rpcJson("tools/list", {});
+    const names = body.result.tools.map((t: any) => t.name);
+    expect(names).toContain("config");
+    expect(names).toContain("get_config");
+    expect(names).toContain("set_config");
+  });
+});
