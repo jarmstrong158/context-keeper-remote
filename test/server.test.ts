@@ -284,6 +284,40 @@ describe("query filters", () => {
     const byId = await callTool("query_entries", { project: p, id: "dec-001" });
     expect(byId.count).toBe(1);
   });
+
+  it("limit caps results and reports total via `matched`", async () => {
+    const p = project("limit");
+    for (let i = 0; i < 5; i++) {
+      await callTool("record_decision", { project: p, summary: `entry ${i}` });
+    }
+    const limited = await callTool("query_entries", { project: p, kind: "decision", limit: 2 });
+    expect(limited.count).toBe(2);
+    expect(limited.matched).toBe(5);
+    expect(limited.results.length).toBe(2);
+    // without a limit, count == matched (existing callers unaffected)
+    const all = await callTool("query_entries", { project: p, kind: "decision" });
+    expect(all.count).toBe(5);
+    expect(all.matched).toBe(5);
+  });
+});
+
+describe("get_project_summary orientation fields", () => {
+  it("returns counts by kind/status, active constraints, recent decisions, and ids", async () => {
+    const p = project("orient");
+    await callTool("record_constraint", { project: p, rule: "no eval" });
+    await callTool("record_decision", { project: p, summary: "first decision" });
+    await callTool("record_decision", { project: p, summary: "second decision" });
+    const s = await callTool("get_project_summary", { project: p });
+    // existing keys preserved
+    expect(s.total).toBe(3);
+    expect(s.by_kind.decision.active).toBe(2);
+    expect(s.by_kind.decision.ids).toContain("dec-001");
+    // additive orientation fields
+    expect(s.active_constraints).toEqual([{ id: "con-001", rule: "no eval" }]);
+    expect(s.recent_decisions.length).toBe(2);
+    expect(s.recent_decisions[0].id).toBe("dec-002"); // most recent first
+    expect(s.recent_decisions[0].summary).toBe("second decision");
+  });
 });
 
 describe("get_context ranking", () => {

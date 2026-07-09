@@ -44,7 +44,7 @@ export const getContextTool = defineTool({
 export const queryEntriesTool = defineTool({
   name: "query_entries",
   description:
-    "Structured query with filters: id, kind, tags (all must match), status ('active' | 'deprecated' | 'all'), and free text. Returns matching entries.",
+    "Structured query with combinable filters: id, kind, tags (all must match), status ('active' | 'deprecated' | 'all'), free text (all terms must appear), and limit. Returns matching entries plus `matched` (total before limit).",
   inputSchema: z.object({
     project: projectField,
     id: z.string().optional().describe("Fetch a single entry by id."),
@@ -55,6 +55,13 @@ export const queryEntriesTool = defineTool({
       .optional()
       .describe("Status filter. Defaults to 'all'."),
     text: z.string().optional().describe("Free-text: all terms must appear in the entry."),
+    limit: z
+      .number()
+      .int()
+      .positive()
+      .max(500)
+      .optional()
+      .describe("Max entries to return (default: all matches)."),
   }),
   async handler(input, { db }) {
     const project = await resolveProject(db, input.project);
@@ -87,14 +94,17 @@ export const queryEntriesTool = defineTool({
       });
     }
 
-    return { project, count: entries.length, results: entries };
+    const matched = entries.length;
+    if (input.limit != null) entries = entries.slice(0, input.limit);
+
+    return { project, count: entries.length, matched, results: entries };
   },
 });
 
 export const getProjectSummaryTool = defineTool({
   name: "get_project_summary",
   description:
-    "Overview of a project: entry counts by kind and status, plus the ids present. Good first call to orient in a project.",
+    "The single orienting call: the whole lay of the land in one response — entry counts by kind and status, the ids present, the active constraints (compact), and the most recent decisions. Good first call to orient in a project; no further probing needed.",
   inputSchema: z.object({ project: projectField }),
   async handler(input, { db }) {
     const project = await resolveProject(db, input.project);
@@ -109,12 +119,28 @@ export const getProjectSummaryTool = defineTool({
       else bucket.active++;
     }
 
+    // Additive orientation fields (existing keys above are unchanged): the
+    // active constraints in compact form and the most recent decisions, so an
+    // agent can orient in one call.
+    const activeConstraints = all
+      .filter((e) => e.kind === "constraint" && e.status === "active")
+      .map((e) => ({ id: e.id, rule: (e.payload.rule as string) ?? "" }));
+    const recentDecisions = all
+      .filter((e) => e.kind === "decision" && e.status === "active")
+      .sort((a, b) =>
+        (b.updated_at || b.created_at).localeCompare(a.updated_at || a.created_at),
+      )
+      .slice(0, 5)
+      .map((e) => ({ id: e.id, summary: (e.payload.summary as string) ?? "" }));
+
     return {
       project,
       total: all.length,
       active: all.filter((e) => e.status === "active").length,
       deprecated: all.filter((e) => e.status === "deprecated").length,
       by_kind: byKind,
+      active_constraints: activeConstraints,
+      recent_decisions: recentDecisions,
     };
   },
 });
