@@ -449,6 +449,68 @@ describe("import_entries round-trip", () => {
   });
 });
 
+describe("upsert_entries timestamp merge", () => {
+  const base = (over: Record<string, unknown>) => ({
+    id: "dec-001",
+    summary: "first",
+    status: "active",
+    created_at: "2026-01-01T00:00:00+00:00",
+    updated_at: "2026-01-01T00:00:00+00:00",
+    ...over,
+  });
+
+  it("inserts a new id, then updates only when incoming updated_at is newer", async () => {
+    const p = project("upsert");
+
+    const first = await callTool("upsert_entries", {
+      project: p,
+      kind: "decision",
+      entries: [base({})],
+    });
+    expect(first.created_count).toBe(1);
+    expect(first.results[0].action).toBe("created");
+
+    // Same id, NEWER timestamp + deprecation -> replaces, carries status across.
+    const newer = await callTool("upsert_entries", {
+      project: p,
+      kind: "decision",
+      entries: [base({ summary: "revised", status: "deprecated", updated_at: "2026-02-01T00:00:00+00:00" })],
+    });
+    expect(newer.updated_count).toBe(1);
+    expect(newer.results[0].action).toBe("updated");
+    expect(newer.results[0].previous.payload.summary).toBe("first"); // loser returned for conflict logging
+
+    const q1 = await callTool("query_entries", { project: p, id: "dec-001", status: "all" });
+    expect(q1.results[0].payload.summary).toBe("revised");
+    expect(q1.results[0].status).toBe("deprecated");
+
+    // Same id, OLDER timestamp -> skipped, existing (deprecated) row preserved.
+    const older = await callTool("upsert_entries", {
+      project: p,
+      kind: "decision",
+      entries: [base({ summary: "stale write", status: "active", updated_at: "2026-01-15T00:00:00+00:00" })],
+    });
+    expect(older.skipped_count).toBe(1);
+    expect(older.results[0].action).toBe("skipped_older");
+
+    const q2 = await callTool("query_entries", { project: p, id: "dec-001", status: "all" });
+    expect(q2.results[0].payload.summary).toBe("revised");
+    expect(q2.results[0].status).toBe("deprecated");
+  });
+
+  it("skips an existing id when incoming has equal timestamp or no timestamp", async () => {
+    const p = project("upsert-eq");
+    await callTool("upsert_entries", { project: p, kind: "decision", entries: [base({})] });
+
+    const equal = await callTool("upsert_entries", {
+      project: p,
+      kind: "decision",
+      entries: [base({ summary: "same ts" })],
+    });
+    expect(equal.results[0].action).toBe("skipped_older");
+  });
+});
+
 describe("default_project via set_config", () => {
   it("falls back to configured default_project when project is omitted", async () => {
     const p = project("cfg");

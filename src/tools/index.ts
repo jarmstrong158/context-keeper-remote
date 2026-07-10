@@ -10,6 +10,7 @@ import { getContextTool, getProjectSummaryTool, queryEntriesTool } from "./retri
 import { deprecateEntryTool, reloadConstraintsTool, updateEntryTool } from "./lifecycle";
 import { exportMarkdownTool, pruneStaleTool, verifyQualityTool } from "./maintenance";
 import { importEntriesTool } from "./import";
+import { upsertEntriesTool } from "./upsert";
 
 // Every tool the server exposes, in a stable order.
 export const ALL_TOOLS: ToolDef[] = [
@@ -35,4 +36,5 @@ export const ALL_TOOLS: ToolDef[] = [
   exportMarkdownTool,
   // remote-only
   importEntriesTool,
+  upsertEntriesTool,
 ];

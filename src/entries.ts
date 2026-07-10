@@ -6,6 +6,7 @@ import {
   type EntryRow,
   type Kind,
   type Status,
+  getEntry,
   hydrate,
   nextId,
   PREFIX,
@@ -144,6 +145,80 @@ export async function insertWithId(
     if (isConflict(err)) return { inserted: false, reason: "id already exists" };
     throw err;
   }
+}
+
+// Upsert an entry with a caller-supplied id (used by upsert_entries). Unlike
+// insertWithId this DOES overwrite, but only when the incoming version is
+// strictly newer by `updated_at` (last-writer-wins by timestamp) — so a
+// mirror push carries edits and deprecations across without ever clobbering a
+// remote change that is itself newer. Never deletes.
+//
+//   - id absent remotely            -> INSERT           -> "created"
+//   - incoming updated_at > existing -> UPDATE (replace) -> "updated"
+//   - incoming updated_at <= existing (or missing)       -> "skipped_older"
+//
+// On "updated" the overwritten (losing) row is returned as `previous` so the
+// caller can preserve it for conflict logging.
+export async function upsertEntry(
+  db: D1Database,
+  args: {
+    id: string;
+    kind: Kind;
+    project: string;
+    // status is passed through verbatim (may be 'superseded', not just the
+    // active/deprecated enum) since the column is free-form TEXT.
+    status?: string;
+    created_at?: string;
+    updated_at?: string;
+    superseded_by?: string | null;
+    payload: Record<string, unknown>;
+  },
+): Promise<{ action: "created" | "updated" | "skipped_older"; previous?: Entry }> {
+  const existing = await getEntry(db, args.project, args.id);
+  const now = nowIso();
+
+  if (!existing) {
+    await db
+      .prepare(
+        `INSERT INTO entries (id, kind, project, status, created_at, updated_at, superseded_by, payload)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        args.id,
+        args.kind,
+        args.project,
+        args.status ?? "active",
+        args.created_at ?? now,
+        args.updated_at ?? now,
+        args.superseded_by ?? null,
+        JSON.stringify(args.payload),
+      )
+      .run();
+    return { action: "created" };
+  }
+
+  // Exists: replace only if the incoming version is strictly newer. A missing
+  // incoming timestamp cannot be proven newer, so it is treated as older.
+  const incomingTs = args.updated_at ?? "";
+  if (!incomingTs || incomingTs <= existing.updated_at) {
+    return { action: "skipped_older" };
+  }
+
+  await db
+    .prepare(
+      `UPDATE entries SET payload = ?, status = ?, superseded_by = ?, updated_at = ?
+       WHERE project = ? AND id = ?`,
+    )
+    .bind(
+      JSON.stringify(args.payload),
+      args.status ?? existing.status,
+      args.superseded_by ?? null,
+      incomingTs,
+      args.project,
+      args.id,
+    )
+    .run();
+  return { action: "updated", previous: existing };
 }
 
 // --- text + scoring ---------------------------------------------------------
