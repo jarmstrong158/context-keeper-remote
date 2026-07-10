@@ -3,6 +3,13 @@ main = "src/index.ts"
 compatibility_date = "2025-06-01"
 compatibility_flags = ["nodejs_compat"]
 
+# Structured logs (see src/log.ts) to Workers Logs: Workers & Pages ->
+# context-keeper-remote -> Logs. Without this the console.log lines never reach
+# the dashboard, so the next dropped handshake could not be diagnosed there.
+# Declared per-env below as well, since CI deploys `--env production`.
+[observability]
+enabled = true
+
 # --- D1 binding (default env) ----------------------------------------------
 # No `database_id` on purpose. This is what the "Deploy to Cloudflare" button
 # and `wrangler dev`/`wrangler deploy` (without --env) read. With the id
@@ -20,6 +27,11 @@ database_name = "context-keeper"
 # the same Worker name/URL. Self-hosters never use this env.
 [env.production]
 name = "context-keeper-remote"
+
+# Named environments do not inherit the top-level [observability], so repeat it
+# here -- this is the env CI actually deploys (`wrangler deploy --env production`).
+[env.production.observability]
+enabled = true
 
 [[env.production.d1_databases]]
 binding = "DB"

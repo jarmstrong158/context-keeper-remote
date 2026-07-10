@@ -7,6 +7,7 @@
 // the stateless handler factory the design calls for.
 
 import { z } from "zod";
+import { log } from "./log";
 
 export const PROTOCOL_VERSION = "2025-06-18";
 // Protocol versions we will echo back if a client asks for them.
@@ -15,6 +16,10 @@ const SUPPORTED_PROTOCOLS = new Set(["2025-06-18", "2025-03-26", "2024-11-05"]);
 export interface ToolContext {
   db: D1Database;
   env: Env;
+  // Lazily ensure the D1 schema exists before a tool runs. Kept OFF the
+  // initialize/ping/tools-list path so the handshake never blocks on D1;
+  // invoked by callTool only. Optional so unit tests can omit it.
+  ready?: () => Promise<void>;
 }
 
 export interface ToolDef<S extends z.ZodType = z.ZodType> {
@@ -119,11 +124,15 @@ async function dispatch(
         (msg.params as { protocolVersion?: string } | undefined)?.protocolVersion;
       const protocolVersion =
         requested && SUPPORTED_PROTOCOLS.has(requested) ? requested : PROTOCOL_VERSION;
-      return rpcResult(id, {
+      // Pure protocol, no I/O -> answers instantly on a cold isolate.
+      log("handshake", { phase: "start", protocol_version: protocolVersion, requested: requested ?? null });
+      const res = rpcResult(id, {
         protocolVersion,
         capabilities: { tools: { listChanged: false } },
         serverInfo: server.info,
       });
+      log("handshake", { phase: "complete", protocol_version: protocolVersion });
+      return res;
     }
     case "ping":
       return rpcResult(id, {});
@@ -164,8 +173,14 @@ async function callTool(
     );
   }
 
+  const started = Date.now();
   try {
+    // Ensure the schema exists on the first tool call of a cold isolate. Inside
+    // the try so a migration failure is reported as an isError tool result
+    // rather than crashing the request.
+    if (ctx.ready) await ctx.ready();
     const result = await tool.def.handler(parsed.data, ctx);
+    log("tool_call", { tool: name, duration_ms: Date.now() - started, ok: true });
     return rpcResult(id, {
       content: [{ type: "text", text: stringify(result) }],
       structuredContent: wrapStructured(result),
@@ -173,6 +188,8 @@ async function callTool(
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    log("tool_call", { tool: name, duration_ms: Date.now() - started, ok: false });
+    log("error", { message, stack: err instanceof Error ? err.stack : undefined });
     return rpcResult(id, {
       content: [{ type: "text", text: `Error: ${message}` }],
       isError: true,
@@ -213,7 +230,18 @@ export function createMcpHandler(server: McpServer) {
 
     const responses: object[] = [];
     for (const msg of messages) {
-      const res = await dispatch(server, msg, ctx);
+      let res: object | null;
+      try {
+        res = await dispatch(server, msg, ctx);
+      } catch (err) {
+        // A single bad message must never take down the batch or bubble a 500.
+        log("error", {
+          message: err instanceof Error ? err.message : String(err),
+          stack: err instanceof Error ? err.stack : undefined,
+        });
+        const id = (msg as JsonRpcRequest)?.id ?? null;
+        res = rpcError(id, RpcError.InternalError, "internal error");
+      }
       if (res) responses.push(res);
     }
 
