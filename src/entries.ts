@@ -58,15 +58,24 @@ export function buildPayload(kind: Kind, input: Record<string, unknown>): Record
   return payload;
 }
 
-// Insert a new entry, generating its id. Retries once if a concurrent writer
-// grabbed the same suffix (PK conflict).
+// Insert a new entry, generating its id. If a concurrent writer grabbed the
+// same suffix we get a PK collision, re-derive the id via nextId, and retry.
+//
+// The steady-state design is two writers (desktop + mobile), for which a single
+// retry already suffices. MAX_INSERT_ATTEMPTS gives cheap headroom above that so
+// a brief burst of >2 overlapping writes to the same project+kind still resolves
+// instead of surfacing a spurious conflict. A short increasing backoff between
+// attempts lets the winning writer's row land before we recompute the next id.
+const MAX_INSERT_ATTEMPTS = 5;
+
 export async function insertEntry(
   db: D1Database,
   args: { kind: Kind; project: string; status?: Status; payload: Record<string, unknown> },
 ): Promise<Entry> {
   const status: Status = args.status ?? "active";
   let lastErr: unknown;
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < MAX_INSERT_ATTEMPTS; attempt++) {
+    if (attempt > 0) await backoff(attempt);
     const id = await nextId(db, args.project, args.kind);
     const now = nowIso();
     try {
@@ -93,7 +102,15 @@ export async function insertEntry(
       if (!isConflict(err)) throw err;
     }
   }
-  throw lastErr instanceof Error ? lastErr : new Error("insert failed after retry");
+  throw lastErr instanceof Error
+    ? lastErr
+    : new Error(`insert failed after ${MAX_INSERT_ATTEMPTS} attempts`);
+}
+
+// Small increasing delay (~2ms, 4ms, …) between id-collision retries so the
+// writer that won the previous round can commit before we recompute the id.
+function backoff(attempt: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, attempt * 2));
 }
 
 function isConflict(err: unknown): boolean {

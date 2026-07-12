@@ -93,7 +93,7 @@ Those two do **not** apply to context-keeper-remote (this repo) — it only need
 
    Replace `<your-subdomain>` with your Worker's subdomain (Step 1) and
    `<AUTH_TOKEN>` with the exact value you set (Step 2).
-3. Save. The tools (`record_decision`, `get_context`, `query_entries`, …) are now
+3. Save. The tools (`record_entry`, `get_context`, `query_entries`, …) are now
    available in your Claude sessions.
 
 **Check it works:** ask Claude to call `get_project_summary`. If it answers, the
@@ -131,24 +131,31 @@ store. Treat it exactly like a password:
 ## Tools
 
 Every tool takes an optional `project`; if omitted it falls back to the configured
-`default_project` (set it once with `set_config`, key `default_project`).
+`default_project` (set it once with `config` — `op='set'`, key `default_project`).
+
+The unified tools (`config`, `record_entry`) are the current surface; the older
+per-operation tools remain as **deprecated aliases** so existing callers keep
+working. New work should prefer the unified tools.
 
 | Tool | Purpose |
 | --- | --- |
-| `set_config` / `get_config` | Config, including `default_project`. |
-| `record_decision` | Record a decision: `summary`, `problem`, `why_chosen`, `what_we_tried`, `tradeoffs`, `tags`. |
-| `record_constraint` | Record a rule that must hold: `rule`, `reason`, `tags`. |
-| `record_pipeline` | Record a reusable process: `name`, `purpose`, `steps` (extra fields kept verbatim). |
+| `config` | Read or write config: `op='get'` reads a key, `op='set'` writes it (`value` required). Use key `default_project` (global scope, no `project`) to pick the project used when a call omits `project`. |
+| `set_config` / `get_config` | **Deprecated** aliases for `config(op='set')` / `config(op='get')`. |
+| `record_entry` | Unified write: record a `decision`, `constraint`, or `pipeline`. Required field depends on kind — decision needs `summary`, constraint needs `rule`, pipeline needs `name`. |
+| `record_decision` | **Deprecated** alias for `record_entry(kind='decision')`: `summary`, `problem`, `why_chosen`, `what_we_tried`, `tradeoffs`, `tags`. |
+| `record_constraint` | **Deprecated** alias for `record_entry(kind='constraint')`: a rule that must hold — `rule`, `reason`, `tags`. |
+| `record_pipeline` | **Deprecated** alias for `record_entry(kind='pipeline')`: a reusable process — `name`, `purpose`, `steps` (extra fields kept verbatim). |
 | `get_context` | Relevance-ranked retrieval for a query (keyword scoring; excludes deprecated unless `include_deprecated`). |
-| `query_entries` | Structured filters: `id`, `kind`, `tags` (all must match), `status` (`active`/`deprecated`/`all`), free `text`. |
-| `get_project_summary` | Counts by kind and status, plus the ids present. |
+| `query_entries` | Structured filters: `id`, `kind`, `tags` (all must match), `status` (`active`/`deprecated`/`all`), free `text`, and `limit`. |
+| `get_project_summary` | One-call orientation: entry counts by kind and status, the ids present, the active constraints (compact), and the most recent decisions. |
 | `update_entry` | Merge `patch` fields into an entry's payload; optionally change `status`. |
 | `deprecate_entry` | Mark deprecated, optionally linking `superseded_by`. |
 | `reload_constraints` | Compact list of the active constraints. |
 | `prune_stale` | Delete old deprecated entries (**dry run by default**; pass `dry_run=false`). |
 | `verify_quality` | Flag entries missing rationale-bearing fields. |
 | `export_markdown` | Render entries as a DECISIONS.md-style document. |
-| `import_entries` | Bulk import from the local JSON store format (preserves ids, reports collisions). |
+| `import_entries` | Bulk import from the local JSON store format (preserves ids, reports collisions, never overwrites). |
+| `upsert_entries` | Bulk upsert in the local store format — the mirror-sync path. New ids are inserted; an existing id is replaced only when the incoming `updated_at` is strictly newer (last-writer-wins by timestamp), else skipped. Carries edits and deprecations between mirrored stores; never deletes. |
 
 ### Entry conventions
 
@@ -215,7 +222,7 @@ worker.
 ### Layout
 
 ```
-src/index.ts             fetch handler: token check -> migrations -> MCP dispatch
+src/index.ts             fetch handler: token check -> MCP dispatch (schema ensured lazily on first tools/call, not on the handshake)
 src/mcp.ts               stateless Streamable HTTP MCP server (createMcpHandler)
 src/db.ts                D1 access + runtime migration runner + id generation
 src/entries.ts           payload normalization, insert-with-retry, keyword scoring
