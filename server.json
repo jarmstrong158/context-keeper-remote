@@ -1,0 +1,28 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.jarmstrong158/context-keeper-remote",
+  "title": "Context Keeper (remote)",
+  "description": "Self-hosted Cloudflare Worker remote backend for context-keeper: a D1-backed, streamable-HTTP MCP endpoint so a second device (e.g. your phone) shares the same project memory. Deploy your own Worker; the URL below is your deployment.",
+  "repository": {
+    "url": "https://github.com/jarmstrong158/context-keeper-remote",
+    "source": "github"
+  },
+  "version": "0.1.0",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://{host}/mcp/{token}",
+      "variables": {
+        "host": {
+          "description": "Your deployed Cloudflare Worker host, e.g. context-keeper-remote.<your-subdomain>.workers.dev",
+          "isRequired": true
+        },
+        "token": {
+          "description": "Your Worker AUTH_TOKEN (set as a Worker secret at deploy time). It is the path credential; keep it private.",
+          "isRequired": true,
+          "isSecret": true
+        }
+      }
+    }
+  ]
+}
