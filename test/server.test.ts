@@ -320,6 +320,51 @@ describe("get_project_summary orientation fields", () => {
   });
 });
 
+describe("list_projects (org registry)", () => {
+  it("enumerates every project with active per-kind counts and preserves exact casing", async () => {
+    const a = project("reg-alpha");
+    const b = project("reg-Beta"); // capital B: proves names round-trip un-lowercased
+    await callTool("record_decision", { project: a, summary: "a1" });
+    await callTool("record_decision", { project: a, summary: "a2" });
+    await callTool("record_constraint", { project: a, rule: "a rule" });
+    await callTool("record_pipeline", { project: a, name: "a pipe" });
+    await callTool("record_decision", { project: b, summary: "b1" });
+
+    const res = await callTool("list_projects", {});
+    // shared (non-isolated) D1: assert on the projects THIS test created.
+    const byName: Record<string, any> = Object.fromEntries(
+      res.projects.map((p: any) => [p.project, p]),
+    );
+
+    expect(byName[a].decisions).toBe(2);
+    expect(byName[a].constraints).toBe(1);
+    expect(byName[a].pipelines).toBe(1);
+    expect(byName[a].active).toBe(4);
+
+    // exact case-sensitive name is present as stored — the whole point.
+    expect(byName[b]).toBeDefined();
+    expect(byName[b].decisions).toBe(1);
+
+    // envelope: count matches the array, totals are numbers.
+    expect(res.count).toBe(res.projects.length);
+    expect(typeof res.totals.decisions).toBe("number");
+  });
+
+  it("counts active vs deprecated separately and excludes deprecated from decisions", async () => {
+    const p = project("reg-dep");
+    await callTool("record_decision", { project: p, summary: "keep" });
+    await callTool("record_decision", { project: p, summary: "drop" });
+    await callTool("deprecate_entry", { project: p, id: "dec-002" });
+
+    const res = await callTool("list_projects", {});
+    const me = res.projects.find((x: any) => x.project === p);
+    expect(me.total).toBe(2);
+    expect(me.active).toBe(1);
+    expect(me.deprecated).toBe(1);
+    expect(me.decisions).toBe(1); // active decisions only
+  });
+});
+
 describe("get_context ranking", () => {
   it("ranks entries by keyword relevance", async () => {
     const p = project("rank");

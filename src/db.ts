@@ -219,3 +219,60 @@ export async function listEntries(
     .all<EntryRow>();
   return (results ?? []).map(hydrate);
 }
+
+// --- org registry -----------------------------------------------------------
+
+// Per-project rollup: how much memory each project holds. Enumerating this is
+// the reliable way to discover every project (and its EXACT, case-sensitive
+// name) without probing names one at a time.
+export interface ProjectStat {
+  project: string;
+  decisions: number; // active only
+  constraints: number; // active only
+  pipelines: number; // active only
+  active: number;
+  deprecated: number;
+  total: number;
+  updated_at: string | null; // most recent entry mutation in the project
+}
+
+// Every project that has at least one entry, with active per-kind counts and
+// the last-updated time. One GROUP BY over the whole table — the org registry.
+export async function listProjects(db: D1Database): Promise<ProjectStat[]> {
+  const active = (kind: Kind) =>
+    `SUM(CASE WHEN kind = '${kind}' AND status = 'active' THEN 1 ELSE 0 END)`;
+  const { results } = await db
+    .prepare(
+      `SELECT project,
+         COUNT(*) AS total,
+         SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active,
+         SUM(CASE WHEN status = 'deprecated' THEN 1 ELSE 0 END) AS deprecated,
+         ${active("decision")} AS decisions,
+         ${active("constraint")} AS constraints,
+         ${active("pipeline")} AS pipelines,
+         MAX(updated_at) AS updated_at
+       FROM entries
+       GROUP BY project
+       ORDER BY decisions DESC, project ASC`,
+    )
+    .all<{
+      project: string;
+      total: number;
+      active: number;
+      deprecated: number;
+      decisions: number;
+      constraints: number;
+      pipelines: number;
+      updated_at: string | null;
+    }>();
+  return (results ?? []).map((r) => ({
+    project: r.project,
+    decisions: Number(r.decisions) || 0,
+    constraints: Number(r.constraints) || 0,
+    pipelines: Number(r.pipelines) || 0,
+    active: Number(r.active) || 0,
+    deprecated: Number(r.deprecated) || 0,
+    total: Number(r.total) || 0,
+    updated_at: r.updated_at ?? null,
+  }));
+}

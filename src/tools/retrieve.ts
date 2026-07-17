@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { defineTool } from "../mcp";
-import { KINDS, type Kind, listEntries, resolveProject, getEntry } from "../db";
+import { KINDS, type Kind, listEntries, listProjects, resolveProject, getEntry } from "../db";
 import { normalizeTags, scoreEntry, searchableText, tokenize } from "../entries";
 import { projectField, tagsField } from "./common";
 
@@ -142,5 +142,26 @@ export const getProjectSummaryTool = defineTool({
       active_constraints: activeConstraints,
       recent_decisions: recentDecisions,
     };
+  },
+});
+
+export const listProjectsTool = defineTool({
+  name: "list_projects",
+  description:
+    "The org registry: every project with entries in this store, plus per-project active counts (decisions, constraints, pipelines), active/deprecated totals, and last-updated time. Enumerates the whole org in one call — the reliable way to discover project names (which are case-sensitive) instead of guessing them. Most-recorded first.",
+  inputSchema: z.object({}),
+  async handler(_input, { db }) {
+    const projects = await listProjects(db);
+    const totals = projects.reduce(
+      (acc, p) => {
+        acc.projects += 1;
+        acc.decisions += p.decisions;
+        acc.constraints += p.constraints;
+        acc.pipelines += p.pipelines;
+        return acc;
+      },
+      { projects: 0, decisions: 0, constraints: 0, pipelines: 0 },
+    );
+    return { count: projects.length, totals, projects };
   },
 });

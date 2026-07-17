@@ -148,6 +148,7 @@ working. New work should prefer the unified tools.
 | `get_context` | Relevance-ranked retrieval for a query (keyword scoring; excludes deprecated unless `include_deprecated`). |
 | `query_entries` | Structured filters: `id`, `kind`, `tags` (all must match), `status` (`active`/`deprecated`/`all`), free `text`, and `limit`. |
 | `get_project_summary` | One-call orientation: entry counts by kind and status, the ids present, the active constraints (compact), and the most recent decisions. |
+| `list_projects` | The org registry: every project with entries, plus per-project active counts (decisions/constraints/pipelines), active/deprecated totals, and last-updated time. Enumerates the whole org in one call — discover exact, case-sensitive project names instead of guessing. |
 | `update_entry` | Merge `patch` fields into an entry's payload; optionally change `status`. |
 | `deprecate_entry` | Mark deprecated, optionally linking `superseded_by`. |
 | `reload_constraints` | Compact list of the active constraints. |
