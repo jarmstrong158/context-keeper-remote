@@ -6,7 +6,12 @@ import {
   recordEntryTool,
   recordPipelineTool,
 } from "./record";
-import { getContextTool, getProjectSummaryTool, queryEntriesTool } from "./retrieve";
+import {
+  getContextTool,
+  getProjectSummaryTool,
+  listProjectsTool,
+  queryEntriesTool,
+} from "./retrieve";
 import { deprecateEntryTool, reloadConstraintsTool, updateEntryTool } from "./lifecycle";
 import { exportMarkdownTool, pruneStaleTool, verifyQualityTool } from "./maintenance";
 import { importEntriesTool } from "./import";
@@ -26,6 +31,7 @@ export const ALL_TOOLS: ToolDef[] = [
   getContextTool,
   queryEntriesTool,
   getProjectSummaryTool,
+  listProjectsTool,
   // lifecycle
   updateEntryTool,
   deprecateEntryTool,
