@@ -1,0 +1,38 @@
+[
+  {
+    "id": "dec-001-b0d4",
+    "summary": "Extract a shared src/shared/mcp-core.ts, byte-identical across context-keeper-remote / agentsync-remote / cambium-remote, guarded by a sha-256 drift test that all three repos pin to the same constant. A published package is the intended end state but deliberately deferred.",
+    "problem": "Three remote MCP Workers each carried their own copy of the JSON-RPC envelope, the MCP handshake semantics, and a safeEqual token comparison. All three safeEqual copies carried the identical comment \"kept in sync with the sibling Worker\" and all three had nonetheless drifted to different behaviour within six weeks of first shipping: context-keeper-remote percent-decoded the path segment before comparing and the other two did not, and two of the three echoed the client's requested protocolVersion verbatim instead of validating it. A fourth Worker was foreseeable, so the copies had to be collapsed before the drift compounded further.",
+    "why_chosen": "True sharing across three SEPARATE GitHub repos requires either a monorepo, a published npm package, or a git subtree \u2014 each of which needs an npm scope, a release workflow, and a coordinated version bump across three independent Cloudflare deploy pipelines. Doing that in the same pass as a batch of security fixes would have coupled an urgent, reviewable change to a risky infrastructure migration. Instead the code was collapsed into ONE import-free file (no imports, so it drops into any repo regardless of their differing extensionless-vs-.js module resolution) that is copied byte-identically, plus a test in each repo that hashes the file's LF-normalized bytes and compares against a constant pinned to the SAME value in all three. Editing the shared file in one repo turns that repo's suite red until the constant is updated, and updating the constant in only one repo makes the divergence visible in review. That converts drift from silent to loud, which was the actual failure mode, and it is reversible in one step once the package exists.",
+    "what_we_tried": "Considered a monorepo (rejected: all three deploy independently to Cloudflare and are separately self-hostable/registry-listed), a git submodule or subtree (rejected: submodules break the one-click \"Deploy to Cloudflare\" fork flow these repos advertise), and simply re-syncing the copies by hand (rejected: that is exactly what the \"kept in sync\" comments already claimed to do, and it demonstrably failed).",
+    "tradeoffs": "This is a drift DETECTOR, not real sharing: three files still exist and a determined editor can still update all three hashes without reconciling behaviour. It also adds a manual step to any shared-core edit (update the file and the hash in three repos in one PR). Accepted because the alternative was leaving three silently diverging security-critical copies in place for longer. A concrete TODO for the @xylem/mcp-core package end state is written at the top of mcp-core.ts.",
+    "alternatives": [],
+    "constraints_created": [
+      "src/shared/mcp-core.ts must stay import-free so it can be copied verbatim between repos with different module resolution",
+      "Any edit to src/shared/mcp-core.ts must update the pinned sha-256 in test/shared-drift.test.ts in ALL THREE repos in the same PR",
+      "Extract to a published @xylem/mcp-core package before a fourth remote Worker is created"
+    ],
+    "related_to": [],
+    "tags": [
+      "mcp",
+      "workers",
+      "shared-code",
+      "drift",
+      "architecture",
+      "xylem"
+    ],
+    "retrieval_hints": [
+      "why is mcp-core.ts duplicated in three repos",
+      "shared-drift test sha256 pin",
+      "how do the three remote MCP Workers share code",
+      "safeEqual drift between Workers"
+    ],
+    "origin": "agent",
+    "schema_version": 4,
+    "status": "active",
+    "superseded_by": null,
+    "created_at": "2026-07-24T21:22:32.548767+00:00",
+    "updated_at": "2026-07-24T21:22:32.548767+00:00",
+    "verified_at": "2026-07-24T21:22:32.548767+00:00"
+  }
+]

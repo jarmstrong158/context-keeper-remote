@@ -2,7 +2,7 @@ import { z } from "zod";
 import { defineTool } from "../mcp";
 import { type Kind, resolveProject } from "../db";
 import { buildPayload, upsertEntry } from "../entries";
-import { projectField } from "./common";
+import { MAX_BATCH_ENTRIES, projectField } from "./common";
 
 // Bulk upsert from the local context-keeper store format. Same input shape as
 // import_entries, but instead of skipping every id that already exists it
@@ -20,9 +20,18 @@ export const upsertEntriesTool = defineTool({
     kind: z
       .enum(["decision", "pipeline", "constraint"])
       .describe("Kind of all entries in this batch."),
+    // Bounded: this ran unbounded, and every entry is a separate D1 write
+    // inside one request. A large enough batch exhausts the Worker's CPU/
+    // subrequest budget partway through and leaves the mirror half-applied,
+    // which is worse than a clean rejection because the caller has no way to
+    // tell which ids landed. Mirrors chunk; 500 is well above a real chunk.
     entries: z
       .array(z.record(z.string(), z.any()))
-      .describe("Entry objects in local store format; each needs an `id` and ideally an `updated_at`."),
+      .max(MAX_BATCH_ENTRIES)
+      .describe(
+        "Entry objects in local store format; each needs an `id` and ideally an `updated_at`. " +
+          `At most ${MAX_BATCH_ENTRIES} per call — send larger mirrors in chunks.`,
+      ),
   }),
   async handler(input, { db }) {
     const project = await resolveProject(db, input.project);

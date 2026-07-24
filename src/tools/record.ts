@@ -2,7 +2,14 @@ import { z } from "zod";
 import { defineTool } from "../mcp";
 import { type Kind, type Status, resolveProject } from "../db";
 import { buildPayload, insertEntry } from "../entries";
-import { projectField, statusField, tagsField, textOrList } from "./common";
+import {
+  MAX_LIST_ITEMS,
+  projectField,
+  statusField,
+  tagsField,
+  textField,
+  textOrList,
+} from "./common";
 
 type RecordInput = { project?: string; status?: Status; [k: string]: unknown };
 
@@ -10,9 +17,25 @@ type RecordInput = { project?: string; status?: Status; [k: string]: unknown };
 // three deprecated record_* aliases, so behavior and response shape are
 // identical no matter which tool a caller uses. buildPayload strips `kind`
 // from the stored payload, so passing the full input through is safe.
+// The record schemas are `.loose()` on purpose -- they accept extra fields
+// verbatim so the local store's shape can evolve without a Worker redeploy.
+// That openness is also the one hole per-field length caps cannot close: any
+// number of unrecognised keys of any size pass straight through into the stored
+// payload. Bounding the SERIALIZED payload closes it without giving up the
+// schema flexibility, and it is the number that actually matters, since this
+// payload is what gets read back into a model's context window.
+const MAX_PAYLOAD_BYTES = 128 * 1024;
+
 async function recordOf(db: D1Database, kind: Kind, input: RecordInput) {
   const project = await resolveProject(db, input.project);
   const payload = buildPayload(kind, input as Record<string, unknown>);
+  const payloadBytes = JSON.stringify(payload).length;
+  if (payloadBytes > MAX_PAYLOAD_BYTES) {
+    throw new Error(
+      `Entry payload is ${payloadBytes} bytes, over the ${MAX_PAYLOAD_BYTES}-byte limit. ` +
+        "Record the decision itself here and link out to the bulk material.",
+    );
+  }
   const entry = await insertEntry(db, { kind, project, status: input.status, payload });
   return { ok: true, id: entry.id, entry };
 }
@@ -39,19 +62,19 @@ export const recordEntryTool = defineTool({
       kind: z.enum(["decision", "constraint", "pipeline"]).describe("Which kind of entry to record."),
       project: projectField,
       // decision
-      summary: z.string().optional().describe("decision: one-line statement of the decision."),
-      problem: z.string().optional().describe("decision: the problem being decided."),
-      why_chosen: z.string().optional().describe("decision: why this option was chosen."),
-      rationale: z.string().optional().describe("decision: deprecated alias for why_chosen."),
+      summary: textField.optional().describe("decision: one-line statement of the decision."),
+      problem: textField.optional().describe("decision: the problem being decided."),
+      why_chosen: textField.optional().describe("decision: why this option was chosen."),
+      rationale: textField.optional().describe("decision: deprecated alias for why_chosen."),
       what_we_tried: textOrList.optional().describe("decision: alternatives considered."),
       tradeoffs: textOrList.optional().describe("decision: known downsides accepted."),
       // constraint
-      rule: z.string().optional().describe("constraint: the rule that must hold."),
-      reason: z.string().optional().describe("constraint: why the constraint exists."),
+      rule: textField.optional().describe("constraint: the rule that must hold."),
+      reason: textField.optional().describe("constraint: why the constraint exists."),
       // pipeline
-      name: z.string().optional().describe("pipeline: pipeline name."),
-      purpose: z.string().optional().describe("pipeline: what the pipeline is for."),
-      steps: z.array(z.any()).optional().describe("pipeline: ordered steps (strings or objects)."),
+      name: textField.optional().describe("pipeline: pipeline name."),
+      purpose: textField.optional().describe("pipeline: what the pipeline is for."),
+      steps: z.array(z.any()).max(MAX_LIST_ITEMS).optional().describe("pipeline: ordered steps (strings or objects)."),
       // shared
       tags: tagsField,
       status: statusField,
@@ -74,11 +97,10 @@ export const recordDecisionTool = defineTool({
     "Deprecated: use record_entry(kind='decision'). Record a decision: what was chosen and why. Captures the problem, the reasoning, alternatives tried, and tradeoffs so future sessions don't relitigate it.",
   inputSchema: z.object({
     project: projectField,
-    summary: z.string().describe("One-line statement of the decision."),
-    problem: z.string().optional().describe("The problem or question being decided."),
-    why_chosen: z.string().optional().describe("Why this option was chosen."),
-    rationale: z
-      .string()
+    summary: textField.describe("One-line statement of the decision."),
+    problem: textField.optional().describe("The problem or question being decided."),
+    why_chosen: textField.optional().describe("Why this option was chosen."),
+    rationale: textField
       .optional()
       .describe("Deprecated alias for why_chosen; mapped forward when why_chosen is absent."),
     what_we_tried: textOrList.optional().describe("Alternatives considered or attempted."),
@@ -97,8 +119,8 @@ export const recordConstraintTool = defineTool({
     "Deprecated: use record_entry(kind='constraint'). Record a constraint: a rule that must hold. Use for invariants, hard requirements, and 'never do X' guardrails.",
   inputSchema: z.object({
     project: projectField,
-    rule: z.string().describe("The rule that must hold."),
-    reason: z.string().optional().describe("Why this constraint exists."),
+    rule: textField.describe("The rule that must hold."),
+    reason: textField.optional().describe("Why this constraint exists."),
     tags: tagsField,
     status: statusField,
   }),
@@ -114,10 +136,11 @@ export const recordPipelineTool = defineTool({
   inputSchema: z
     .object({
       project: projectField,
-      name: z.string().describe("Pipeline name."),
-      purpose: z.string().optional().describe("What the pipeline is for."),
+      name: textField.describe("Pipeline name."),
+      purpose: textField.optional().describe("What the pipeline is for."),
       steps: z
         .array(z.any())
+        .max(MAX_LIST_ITEMS)
         .optional()
         .describe("Ordered steps (strings or objects), as given."),
       tags: tagsField,
