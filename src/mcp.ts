@@ -8,10 +8,20 @@
 
 import { z } from "zod";
 import { log } from "./log";
+import {
+  DEFAULT_PROTOCOL_VERSION,
+  type JsonRpcMessage,
+  RPC_INVALID_PARAMS,
+  RPC_INVALID_REQUEST,
+  RPC_METHOD_NOT_FOUND,
+  handleJsonRpcHttp,
+  isNotification,
+  negotiateProtocol,
+  rpcError,
+  rpcResult,
+} from "./shared/mcp-core";
 
-export const PROTOCOL_VERSION = "2025-06-18";
-// Protocol versions we will echo back if a client asks for them.
-const SUPPORTED_PROTOCOLS = new Set(["2025-06-18", "2025-03-26", "2024-11-05"]);
+export const PROTOCOL_VERSION = DEFAULT_PROTOCOL_VERSION;
 
 export interface ToolContext {
   db: D1Database;
@@ -80,58 +90,41 @@ function toInputJsonSchema(schema: z.ZodType): Record<string, unknown> {
 }
 
 // --- JSON-RPC plumbing ------------------------------------------------------
-
-interface JsonRpcRequest {
-  jsonrpc?: string;
-  id?: string | number | null;
-  method?: string;
-  params?: unknown;
-}
-
-const enum RpcError {
-  ParseError = -32700,
-  InvalidRequest = -32600,
-  MethodNotFound = -32601,
-  InvalidParams = -32602,
-  InternalError = -32603,
-}
-
-function rpcError(id: string | number | null, code: number, message: string, data?: unknown) {
-  return { jsonrpc: "2.0", id, error: data === undefined ? { code, message } : { code, message, data } };
-}
-
-function rpcResult(id: string | number | null, result: unknown) {
-  return { jsonrpc: "2.0", id, result };
-}
+//
+// The envelope (batching, notification handling, parse errors, size caps) lives
+// in src/shared/mcp-core.ts and is shared byte-identically with
+// agentsync-remote and cambium-remote. Only the MCP method semantics below are
+// repo-specific.
 
 // A single JSON-RPC message -> a response object, or null for notifications.
 async function dispatch(
   server: McpServer,
-  msg: JsonRpcRequest,
+  msg: JsonRpcMessage,
   ctx: ToolContext,
 ): Promise<object | null> {
   const id = msg.id ?? null;
-  const isNotification = msg.id === undefined || msg.id === null;
+  const notification = isNotification(msg);
   const method = msg.method;
 
   if (!method) {
-    return isNotification ? null : rpcError(id, RpcError.InvalidRequest, "missing method");
+    return notification ? null : rpcError(id, RPC_INVALID_REQUEST, "missing method");
   }
 
   switch (method) {
     case "initialize": {
-      const requested =
-        (msg.params as { protocolVersion?: string } | undefined)?.protocolVersion;
-      const protocolVersion =
-        requested && SUPPORTED_PROTOCOLS.has(requested) ? requested : PROTOCOL_VERSION;
+      // Never echo an unrecognized version back: a client asking for "banana"
+      // negotiates down to our pinned revision rather than dictating it.
+      const { version, requested } = negotiateProtocol(
+        (msg.params as { protocolVersion?: unknown } | undefined)?.protocolVersion,
+      );
       // Pure protocol, no I/O -> answers instantly on a cold isolate.
-      log("handshake", { phase: "start", protocol_version: protocolVersion, requested: requested ?? null });
+      log("handshake", { phase: "start", protocol_version: version, requested });
       const res = rpcResult(id, {
-        protocolVersion,
+        protocolVersion: version,
         capabilities: { tools: { listChanged: false } },
         serverInfo: server.info,
       });
-      log("handshake", { phase: "complete", protocol_version: protocolVersion });
+      log("handshake", { phase: "complete", protocol_version: version });
       return res;
     }
     case "ping":
@@ -142,8 +135,8 @@ async function dispatch(
       return callTool(server, id, msg.params, ctx);
     default:
       // Notifications like notifications/initialized are acknowledged silently.
-      if (isNotification || method.startsWith("notifications/")) return null;
-      return rpcError(id, RpcError.MethodNotFound, `unknown method: ${method}`);
+      if (notification) return null;
+      return rpcError(id, RPC_METHOD_NOT_FOUND, `unknown method: ${method}`);
   }
 }
 
@@ -157,16 +150,16 @@ async function callTool(
     name?: string;
     arguments?: unknown;
   };
-  if (!name) return rpcError(id, RpcError.InvalidParams, "missing tool name");
+  if (!name) return rpcError(id, RPC_INVALID_PARAMS, "missing tool name");
 
   const tool = server.get(name);
-  if (!tool) return rpcError(id, RpcError.MethodNotFound, `unknown tool: ${name}`);
+  if (!tool) return rpcError(id, RPC_METHOD_NOT_FOUND, `unknown tool: ${name}`);
 
   const parsed = tool.def.inputSchema.safeParse(args ?? {});
   if (!parsed.success) {
     return rpcError(
       id,
-      RpcError.InvalidParams,
+      RPC_INVALID_PARAMS,
       `invalid arguments for ${name}: ${parsed.error.issues
         .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
         .join("; ")}`,
@@ -210,47 +203,18 @@ function wrapStructured(value: unknown): Record<string, unknown> {
   return { result: value };
 }
 
-const JSON_HEADERS = { "content-type": "application/json" } as const;
-
 // The stateless handler factory. Returns a function that turns one POST body
-// into one HTTP response, per Streamable HTTP.
+// into one HTTP response, per Streamable HTTP. The envelope itself (batching,
+// 202-for-notifications, parse errors, body-size and batch-cardinality caps) is
+// the shared implementation; only `dispatch` is repo-specific.
 export function createMcpHandler(server: McpServer) {
   return async function handle(request: Request, ctx: ToolContext): Promise<Response> {
-    let body: unknown;
-    try {
-      body = await request.json();
-    } catch {
-      return Response.json(rpcError(null, RpcError.ParseError, "invalid JSON"), {
-        headers: JSON_HEADERS,
-      });
-    }
-
-    const batch = Array.isArray(body);
-    const messages = (batch ? body : [body]) as JsonRpcRequest[];
-
-    const responses: object[] = [];
-    for (const msg of messages) {
-      let res: object | null;
-      try {
-        res = await dispatch(server, msg, ctx);
-      } catch (err) {
-        // A single bad message must never take down the batch or bubble a 500.
+    return handleJsonRpcHttp(request, (msg) => dispatch(server, msg, ctx), {
+      onError: (err) =>
         log("error", {
           message: err instanceof Error ? err.message : String(err),
           stack: err instanceof Error ? err.stack : undefined,
-        });
-        const id = (msg as JsonRpcRequest)?.id ?? null;
-        res = rpcError(id, RpcError.InternalError, "internal error");
-      }
-      if (res) responses.push(res);
-    }
-
-    // Only notifications -> nothing to return.
-    if (responses.length === 0) {
-      return new Response(null, { status: 202 });
-    }
-
-    const payload = batch ? responses : responses[0];
-    return new Response(JSON.stringify(payload), { headers: JSON_HEADERS });
+        }),
+    });
   };
 }

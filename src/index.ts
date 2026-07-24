@@ -13,6 +13,7 @@
 
 import { runMigrations } from "./db";
 import { McpServer, createMcpHandler, type ToolContext } from "./mcp";
+import { pathTokenMatches } from "./shared/mcp-core";
 import { ALL_TOOLS } from "./tools";
 import { log } from "./log";
 
@@ -26,13 +27,11 @@ function notFound(): Response {
   return new Response("Not Found", { status: 404 });
 }
 
-// Length-invariant string comparison to avoid timing side channels on the token.
-function safeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
-}
+// Token comparison lives in src/shared/mcp-core.ts (pathTokenMatches), shared
+// byte-identically with agentsync-remote and cambium-remote. It percent-decodes
+// the segment, contains the URIError a malformed escape like /mcp/%zz used to
+// throw from OUTSIDE the try block below, and compares in time independent of
+// BOTH the content and the length of the two strings.
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -48,10 +47,8 @@ export default {
 
     if (!match) return notFound();
 
-    const token = decodeURIComponent(match[1]);
-    const expected = env.AUTH_TOKEN ?? "";
     // Missing/empty secret => nothing authenticates => always 404.
-    const ok = !!expected && safeEqual(token, expected);
+    const ok = await pathTokenMatches(match[1], env.AUTH_TOKEN);
     log("auth", { ok });
     if (!ok) return notFound();
 
