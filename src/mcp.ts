@@ -17,6 +17,13 @@ import {
   handleJsonRpcHttp,
   isNotification,
   negotiateProtocol,
+  requestProtocolVersion,
+  stampModernResult,
+  validateRequestHeaders,
+  SUPPORTED_PROTOCOLS,
+  SUPPORTED_PROTOCOL_LIST,
+  RPC_HEADER_MISMATCH,
+  RPC_UNSUPPORTED_PROTOCOL_VERSION,
   rpcError,
   rpcResult,
 } from "./shared/mcp-core";
@@ -101,6 +108,7 @@ async function dispatch(
   server: McpServer,
   msg: JsonRpcMessage,
   ctx: ToolContext,
+  headers: { get(name: string): string | null } | null,
 ): Promise<object | null> {
   const id = msg.id ?? null;
   const notification = isNotification(msg);
@@ -110,7 +118,67 @@ async function dispatch(
     return notification ? null : rpcError(id, RPC_INVALID_REQUEST, "missing method");
   }
 
+  // --- Protocol era (revision 2026-07-28) ---------------------------------
+  //
+  // There is no handshake any more: a modern client declares its version in
+  // `params._meta` on every request; a legacy client opens with `initialize`
+  // and never sends `_meta`. Presence of that key is the era signal. Both are
+  // served -- the desktop context-keeper's mirror and any already-configured
+  // client are legacy until upgraded, and legacy clients have no fall-forward
+  // mechanism, so a modern-only remote would simply break them.
+  const declaredVersion = requestProtocolVersion(msg.params);
+  const modern = declaredVersion !== null;
+
+  if (modern && !SUPPORTED_PROTOCOLS.has(declaredVersion)) {
+    return notification
+      ? null
+      : rpcError(id, RPC_UNSUPPORTED_PROTOCOL_VERSION, "Unsupported protocol version", {
+          supported: SUPPORTED_PROTOCOL_LIST,
+          requested: declaredVersion,
+        });
+  }
+
+  // Streamable HTTP mirrors selected body fields into headers so gateways can
+  // route without parsing the body; the server MUST reject any disagreement,
+  // or a gateway routing on the header and this server executing on the body
+  // can be made to disagree on purpose.
+  if (headers) {
+    const named =
+      method === "tools/call"
+        ? ((msg.params as { name?: unknown } | undefined)?.name ?? null)
+        : null;
+    const problem = validateRequestHeaders(
+      headers,
+      method,
+      declaredVersion,
+      typeof named === "string" ? named : null,
+    );
+    if (problem) {
+      return notification ? null : rpcError(id, RPC_HEADER_MISMATCH, problem);
+    }
+  }
+
+  // Legacy callers get byte-identical responses to pre-migration; the modern
+  // fields are added only for modern callers.
+  const ok = (result: Record<string, unknown>) =>
+    rpcResult(id, modern ? stampModernResult(result, method, server.info) : result);
+
   switch (method) {
+    case "server/discover": {
+      // MUST be implemented as of 2026-07-28. Answered regardless of the era
+      // the caller declared, since a dual-era client may use it as a probe.
+      return rpcResult(
+        id,
+        stampModernResult(
+          {
+            supportedVersions: SUPPORTED_PROTOCOL_LIST,
+            capabilities: { tools: { listChanged: false } },
+          },
+          "server/discover",
+          server.info,
+        ),
+      );
+    }
     case "initialize": {
       // Never echo an unrecognized version back: a client asking for "banana"
       // negotiates down to our pinned revision rather than dictating it.
@@ -128,11 +196,11 @@ async function dispatch(
       return res;
     }
     case "ping":
-      return rpcResult(id, {});
+      return ok({});
     case "tools/list":
-      return rpcResult(id, { tools: server.list() });
+      return ok({ tools: server.list() });
     case "tools/call":
-      return callTool(server, id, msg.params, ctx);
+      return callTool(server, id, msg.params, ctx, ok);
     default:
       // Notifications like notifications/initialized are acknowledged silently.
       if (notification) return null;
@@ -145,6 +213,7 @@ async function callTool(
   id: string | number | null,
   params: unknown,
   ctx: ToolContext,
+  ok: (result: Record<string, unknown>) => object,
 ): Promise<object> {
   const { name, arguments: args } = (params ?? {}) as {
     name?: string;
@@ -174,7 +243,7 @@ async function callTool(
     if (ctx.ready) await ctx.ready();
     const result = await tool.def.handler(parsed.data, ctx);
     log("tool_call", { tool: name, duration_ms: Date.now() - started, ok: true });
-    return rpcResult(id, {
+    return ok({
       content: [{ type: "text", text: stringify(result) }],
       structuredContent: wrapStructured(result),
       isError: false,
@@ -183,7 +252,7 @@ async function callTool(
     const message = err instanceof Error ? err.message : String(err);
     log("tool_call", { tool: name, duration_ms: Date.now() - started, ok: false });
     log("error", { message, stack: err instanceof Error ? err.stack : undefined });
-    return rpcResult(id, {
+    return ok({
       content: [{ type: "text", text: `Error: ${message}` }],
       isError: true,
     });
@@ -209,7 +278,7 @@ function wrapStructured(value: unknown): Record<string, unknown> {
 // the shared implementation; only `dispatch` is repo-specific.
 export function createMcpHandler(server: McpServer) {
   return async function handle(request: Request, ctx: ToolContext): Promise<Response> {
-    return handleJsonRpcHttp(request, (msg) => dispatch(server, msg, ctx), {
+    return handleJsonRpcHttp(request, (msg) => dispatch(server, msg, ctx, request.headers), {
       onError: (err) =>
         log("error", {
           message: err instanceof Error ? err.message : String(err),
