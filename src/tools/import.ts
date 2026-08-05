@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { defineTool } from "../mcp";
-import { type Kind, type Status, resolveProject } from "../db";
+import { type Kind, resolveProject } from "../db";
 import { buildPayload, insertEntry, insertWithId } from "../entries";
 import { projectField } from "./common";
 
@@ -73,6 +73,12 @@ export const importEntriesTool = defineTool({
   },
 });
 
-function normalizeStatus(value: unknown): Status | undefined {
-  return value === "deprecated" ? "deprecated" : value === "active" ? "active" : undefined;
+// Status is passed through verbatim, matching upsert_entries. It used to be
+// squeezed into the active/deprecated enum, which silently rewrote every
+// SUPERSEDED entry as active on the way in: superseded_by survived the trip
+// and the status did not, so the remote showed a replaced decision as current
+// while still naming its replacement. The column is free-form TEXT precisely
+// so a lifecycle state the enum does not know about survives the round trip.
+function normalizeStatus(value: unknown): string | undefined {
+  return typeof value === "string" && value ? value : undefined;
 }

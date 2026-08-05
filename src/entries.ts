@@ -70,9 +70,11 @@ const MAX_INSERT_ATTEMPTS = 5;
 
 export async function insertEntry(
   db: D1Database,
-  args: { kind: Kind; project: string; status?: Status; payload: Record<string, unknown> },
+  args: { kind: Kind; project: string; status?: string; payload: Record<string, unknown> },
 ): Promise<Entry> {
-  const status: Status = args.status ?? "active";
+  // Verbatim, like insertWithId/upsertEntry: the column is free-form TEXT and
+  // 'superseded' is a real lifecycle state the two-value enum cannot hold.
+  const status = (args.status ?? "active") as Status;
   let lastErr: unknown;
   for (let attempt = 0; attempt < MAX_INSERT_ATTEMPTS; attempt++) {
     if (attempt > 0) await backoff(attempt);
@@ -126,7 +128,9 @@ export async function insertWithId(
     id: string;
     kind: Kind;
     project: string;
-    status?: Status;
+    // Verbatim, like upsertEntry: may be 'superseded', not just the
+    // active/deprecated enum. The column is free-form TEXT.
+    status?: string;
     created_at?: string;
     updated_at?: string;
     superseded_by?: string | null;
@@ -236,6 +240,67 @@ export async function upsertEntry(
     )
     .run();
   return { action: "updated", previous: existing };
+}
+
+// --- supersession history ---------------------------------------------------
+
+// The predecessor line, byte-identical to what the local server prepends
+// (context-keeper server.py: _compact / _predecessor_line / _predecessor_map).
+//
+// Both halves of the pair have to agree. get_context is the same tool over two
+// transports, and an agent reading it over HTTP has to see the same history as
+// one reading it over stdio -- otherwise "what changed, and why" silently
+// depends on which client the session happened to connect with, which is the
+// least debuggable kind of divergence. Any edit to the format here is an edit
+// to both files; `predecessor line` in test/server.test.ts pins the shape.
+
+const PREDECESSOR_TEXT_CHARS = 140;
+
+export function compactText(text: unknown, limit: number): string {
+  const s = String(text ?? "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .join(" ");
+  if (s.length <= limit) return s;
+  return s.slice(0, limit - 3).replace(/\s+$/, "") + "...";
+}
+
+function entryLabel(entry: Entry): string {
+  const p = entry.payload;
+  return String(p.summary || p.rule || p.name || "?");
+}
+
+export function predecessorLine(prior: Entry, successor: Entry): string {
+  const was = compactText(entryLabel(prior), PREDECESSOR_TEXT_CHARS);
+  // deprecate_entry(superseded_by) records an explicit reason; the
+  // record(supersedes) path has none, so fall back to what forced the
+  // replacement. Never invent one.
+  const why = compactText(
+    prior.payload.deprecated_reason || successor.payload.problem || "",
+    PREDECESSOR_TEXT_CHARS,
+  );
+  const line = `supersedes ${prior.id}: was "${was}"`;
+  return why ? `${line} -- changed because: ${why}` : line;
+}
+
+// { replacement_id -> predecessor }. Must be built over ALL entries including
+// deprecated/superseded ones: a predecessor is by definition no longer active,
+// so the retrieval filters have already dropped it.
+export function predecessorMap(all: Entry[]): Map<string, Entry> {
+  const out = new Map<string, Entry>();
+  for (const e of all) {
+    const newer = e.superseded_by;
+    if (!newer || !e.id) continue;
+    // Several entries can point at one replacement; keep the most recently
+    // changed -- the IMMEDIATE predecessor. Same tiebreak as local.
+    const prior = out.get(newer);
+    if (!prior || sortKey(e) > sortKey(prior)) out.set(newer, e);
+  }
+  return out;
+}
+
+function sortKey(e: Entry): string {
+  return `${e.updated_at ?? ""} ${e.id ?? ""}`;
 }
 
 // --- text + scoring ---------------------------------------------------------

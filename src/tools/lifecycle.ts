@@ -54,6 +54,7 @@ export const deprecateEntryTool = defineTool({
       .string()
       .optional()
       .describe("Id of the entry that replaces this one."),
+    reason: z.string().optional().describe("Why it was deprecated."),
   }),
   async handler(input, { db }) {
     const project = await resolveProject(db, input.project);
@@ -65,12 +66,22 @@ export const deprecateEntryTool = defineTool({
       supersededExists = !!(await getEntry(db, project, input.superseded_by));
     }
 
+    // Stored under the key the LOCAL store uses (`deprecated_reason` in the
+    // payload blob), because that is the field the predecessor line reads.
+    // Without it a deprecation performed here rendered a different line than
+    // the identical deprecation performed locally and mirrored across -- the
+    // renderer was shared, the input was not.
+    const payload =
+      input.reason != null
+        ? { ...entry.payload, deprecated_reason: input.reason }
+        : entry.payload;
+
     const now = nowIso();
     await db
       .prepare(
-        `UPDATE entries SET status = 'deprecated', superseded_by = ?, updated_at = ? WHERE project = ? AND id = ?`,
+        `UPDATE entries SET status = 'deprecated', superseded_by = ?, updated_at = ?, payload = ? WHERE project = ? AND id = ?`,
       )
-      .bind(input.superseded_by ?? null, now, project, input.id)
+      .bind(input.superseded_by ?? null, now, JSON.stringify(payload), project, input.id)
       .run();
 
     return {
