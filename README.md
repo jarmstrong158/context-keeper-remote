@@ -126,6 +126,43 @@ store. Treat it exactly like a password:
   token starts getting `404`s until you update it in claude.ai (Step 3) with the new
   value.
 
+### Why the token is in the URL path, and what that costs you
+
+This is a **deliberate design choice, not an oversight**. claude.ai custom
+connectors do not reliably send custom headers, so an `Authorization:` header —
+the obvious alternative — cannot be depended on. Putting the credential in the
+path is what makes the connector work at all.
+
+Be clear about the price, because it is not the same as a header:
+
+- **URLs get recorded in places request bodies never do.** Browser history,
+  shell history, proxy and CDN access logs, crash reports, bug reports,
+  screenshots, "copy link" buttons, and **agent session transcripts**. During
+  the audit that produced this section, the connector URLs for these Workers
+  were found in **~54 occurrences across 13 local session transcripts** on a
+  single machine — none of them pasted deliberately; they were simply part of
+  the tool configuration an agent echoed back.
+- **The Worker itself does not log it.** Every log line records the route as
+  `/mcp/***`. The leak surface is everything *around* the Worker, which is
+  exactly what you cannot audit.
+- **A leaked token is full access, with no second factor and no per-caller
+  identity.** There is nothing to revoke except the token itself, and no log
+  that will tell you who used it.
+
+**Practical guidance:**
+
+1. **Rotate on a schedule**, not just on suspicion — assume the URL has been
+   recorded somewhere you don't control. Rotation is cheap: change `AUTH_TOKEN`,
+   update the connector.
+2. **Rotate immediately** if you've shared a terminal recording, a transcript,
+   a screen capture, or a bug report from a machine where the connector is
+   configured.
+3. Use a **long random token** (32+ bytes, e.g. `openssl rand -hex 32`). The
+   comparison is constant-time in both content *and* length, so length is not
+   observable — but entropy is still your only defence against guessing.
+4. If you ever get the chance to use a header or OAuth instead, **take it**.
+   This tradeoff is forced by the client, not preferred.
+
 ---
 
 ## Tools
@@ -145,17 +182,17 @@ working. New work should prefer the unified tools.
 | `record_decision` | **Deprecated** alias for `record_entry(kind='decision')`: `summary`, `problem`, `why_chosen`, `what_we_tried`, `tradeoffs`, `tags`. |
 | `record_constraint` | **Deprecated** alias for `record_entry(kind='constraint')`: a rule that must hold — `rule`, `reason`, `tags`. |
 | `record_pipeline` | **Deprecated** alias for `record_entry(kind='pipeline')`: a reusable process — `name`, `purpose`, `steps` (extra fields kept verbatim). |
-| `get_context` | Relevance-ranked retrieval for a query (keyword scoring; excludes deprecated unless `include_deprecated`). |
+| `get_context` | Relevance-ranked retrieval for a query (keyword scoring; excludes deprecated unless `include_deprecated`). An entry that superseded something carries a one-line `predecessor` -- what the prior entry said and why it changed -- byte-identical to the local server's, so history reads the same over either transport. |
 | `query_entries` | Structured filters: `id`, `kind`, `tags` (all must match), `status` (`active`/`deprecated`/`all`), free `text`, and `limit`. |
 | `get_project_summary` | One-call orientation: entry counts by kind and status, the ids present, the active constraints (compact), and the most recent decisions. |
 | `list_projects` | The org registry: every project with entries, plus per-project active counts (decisions/constraints/pipelines), active/deprecated totals, and last-updated time. Enumerates the whole org in one call — discover exact, case-sensitive project names instead of guessing. |
 | `update_entry` | Merge `patch` fields into an entry's payload; optionally change `status`. |
-| `deprecate_entry` | Mark deprecated, optionally linking `superseded_by`. |
+| `deprecate_entry` | Mark deprecated, optionally linking `superseded_by` and recording a `reason` (the reason is what the predecessor line quotes). |
 | `reload_constraints` | Compact list of the active constraints. |
 | `prune_stale` | Delete old deprecated entries (**dry run by default**; pass `dry_run=false`). |
 | `verify_quality` | Flag entries missing rationale-bearing fields. |
 | `export_markdown` | Render entries as a DECISIONS.md-style document. |
-| `import_entries` | Bulk import from the local JSON store format (preserves ids, reports collisions, never overwrites). |
+| `import_entries` | Bulk import from the local JSON store format (preserves ids and lifecycle status including `superseded`, reports collisions, never overwrites). |
 | `upsert_entries` | Bulk upsert in the local store format — the mirror-sync path. New ids are inserted; an existing id is replaced only when the incoming `updated_at` is strictly newer (last-writer-wins by timestamp), else skipped. Carries edits and deprecations between mirrored stores; never deletes. |
 
 ### Entry conventions
