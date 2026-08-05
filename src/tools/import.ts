@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { defineTool } from "../mcp";
 import { type Kind, resolveProject } from "../db";
-import { buildPayload, insertEntry, insertWithId } from "../entries";
+import { coerceIncomingEntry, insertEntry, insertWithId } from "../entries";
 import { projectField } from "./common";
 
 // Bulk import from the local context-keeper store format: each of
@@ -29,9 +29,7 @@ export const importEntriesTool = defineTool({
     const skipped: Array<{ id?: string; reason: string }> = [];
 
     for (const raw of input.entries) {
-      const incomingId = typeof raw.id === "string" ? raw.id : undefined;
-      const status = normalizeStatus(raw.status);
-      const payload = buildPayload(kind, raw);
+      const { id: incomingId, payload, ...cols } = coerceIncomingEntry(kind, raw);
 
       try {
         if (incomingId) {
@@ -39,18 +37,16 @@ export const importEntriesTool = defineTool({
             id: incomingId,
             kind,
             project,
-            status,
-            created_at: typeof raw.created_at === "string" ? raw.created_at : undefined,
-            updated_at: typeof raw.updated_at === "string" ? raw.updated_at : undefined,
-            superseded_by:
-              typeof raw.superseded_by === "string" ? raw.superseded_by : null,
             payload,
+            ...cols,
           });
           if (res.inserted) imported.push(incomingId);
           else skipped.push({ id: incomingId, reason: res.reason ?? "skipped" });
         } else {
           // No id supplied: allocate a fresh one in sequence.
-          const entry = await insertEntry(db, { kind, project, status, payload });
+          const entry = await insertEntry(db, {
+            kind, project, status: cols.status, payload,
+          });
           imported.push(entry.id);
         }
       } catch (err) {
@@ -72,13 +68,3 @@ export const importEntriesTool = defineTool({
     };
   },
 });
-
-// Status is passed through verbatim, matching upsert_entries. It used to be
-// squeezed into the active/deprecated enum, which silently rewrote every
-// SUPERSEDED entry as active on the way in: superseded_by survived the trip
-// and the status did not, so the remote showed a replaced decision as current
-// while still naming its replacement. The column is free-form TEXT precisely
-// so a lifecycle state the enum does not know about survives the round trip.
-function normalizeStatus(value: unknown): string | undefined {
-  return typeof value === "string" && value ? value : undefined;
-}
