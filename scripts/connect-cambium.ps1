@@ -236,10 +236,17 @@ $statusUrl = "$CambiumUrl/status/$token"
 # --- verify BEFORE wiring it here ----------------------------------------
 # Catching a bad URL now is the difference between an error here and a panel
 # that silently says "unreachable" on a phone days later.
-Write-Host "  verifying the status route..." -NoNewline
+# 60 seconds, not 18. `wrangler secret put` does not merely store a value: it
+# creates a NEW Worker version and rolls it out. Until that reaches an edge,
+# requests there are still served by the PREVIOUS version, which holds the
+# PREVIOUS token -- so a correct token legitimately 404s for a while. An 18-second
+# window was inside that race, and the resulting message blamed a missing
+# deployment, which sent the whole diagnosis in the wrong direction.
+Write-Host "  waiting for the new version to roll out (up to 60s)" -NoNewline
 $ok = $false; $detail = ""
-foreach ($attempt in 1..6) {
+foreach ($attempt in 1..20) {
     Start-Sleep -Seconds 3
+    Write-Host "." -NoNewline
     try {
         $r = Invoke-WebRequest -Uri $statusUrl -Method Get -TimeoutSec 20 -UseBasicParsing `
              -Headers @{ "user-agent" = "context-keeper-view/1.0" }
@@ -251,9 +258,14 @@ foreach ($attempt in 1..6) {
 }
 if (-not $ok) {
     Write-Host ""
-    Say "cambium-remote did not serve the status route ($detail)."
-    Say "The most likely cause is that it has not been redeployed since the"
-    Say "/status route was added. Deploy it, then re-run this."
+    Say "cambium-remote did not serve the status route after 60s ($detail)."
+    Say ""
+    Say "Two causes, in order of likelihood:"
+    Say "  1. cambium-remote has not been deployed since the /status route was"
+    Say "     added. Check that its Deploy workflow actually SUCCEEDED -- filter"
+    Say "     by workflow name -- gh run list alone returns CI, not Deploy. If"
+    Say "     it failed, deploy from the checkout with: npx wrangler deploy"
+    Say "  2. The rollout is unusually slow. Re-running is safe and cheap."
     Fail "CAMBIUM_STATUS_URL was NOT set, so nothing here points at a route that does not work."
 }
 Write-Host " ok" -ForegroundColor Green
