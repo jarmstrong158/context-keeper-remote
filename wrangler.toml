@@ -21,6 +21,24 @@ enabled = true
 binding = "DB"
 database_name = "context-keeper"
 
+
+# --- cambium-remote service binding ----------------------------------------
+# The Knowledge panel reads cambium-remote's /status route. It CANNOT do that
+# with a plain fetch to https://cambium-remote.<account>.workers.dev: Cloudflare
+# does not route a Worker subrequest to a workers.dev hostname, and the edge
+# answers 404 without the target Worker ever running. That failure is
+# indistinguishable from "wrong token" from the caller's side -- the target's
+# own logs show no request at all, which is the only way to tell.
+#
+# A service binding is the supported mechanism. It dispatches in-process, so
+# there is no DNS, no TLS, no egress, and no extra latency. The request still
+# arrives at cambium-remote's normal fetch handler and is still checked against
+# STATUS_TOKEN, so the credential separation is unchanged -- the binding
+# replaces the transport, not the authorization.
+[[services]]
+binding = "CAMBIUM"
+service = "cambium-remote"
+
 # --- production env (this repo's own CI) -----------------------------------
 # The maintainer's GitHub Actions deploy runs `wrangler deploy --env production`
 # and pins the existing D1 by id, so CI keeps deploying to the same database and
@@ -41,3 +59,9 @@ database_id = "4ed77245-807b-4fa8-a50d-c71cfd3c704d"
 # AUTH_TOKEN is NOT declared here. It is a secret, set in the dashboard:
 # Worker -> Settings -> Variables and Secrets -> add AUTH_TOKEN. Keeping it out
 # of source and out of Git is intentional; the connector URL embeds it.
+
+# Named environments inherit nothing, so the binding is repeated for the env CI
+# actually deploys.
+[[env.production.services]]
+binding = "CAMBIUM"
+service = "cambium-remote"

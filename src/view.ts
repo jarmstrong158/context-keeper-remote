@@ -37,7 +37,16 @@ import { healthReport, healthHtml, projectsHtml } from "./health";
 // A phone on mobile data must not hang because a SECOND service is slow: the
 // decision logs are this Worker's own data and always render. The knowledge
 // panel is an enrichment, and it degrades to a stated absence.
-const CAMBIUM_TIMEOUT_MS = 2500;
+// Only the Knowledge tab waits on cambium, so it can afford a real budget:
+// that is the tab you opened *in order to* see these numbers, and cambium's
+// status does a GitHub discovery scan across every repo under TEAM_OWNER, which
+// is seconds of work, not milliseconds. At 2500ms it timed out every time and
+// the panel reported a failure for a service that was answering correctly.
+//
+// Every other tab now skips the call entirely rather than sharing a budget with
+// it -- see renderHome. Previously Recent and Projects paid this latency too,
+// for a panel they do not render.
+const CAMBIUM_TIMEOUT_MS = 10_000;
 
 interface KnowledgeSummary {
   teamActive: number;
@@ -58,7 +67,10 @@ interface KnowledgeSummary {
  * at knowledge from a phone therefore cannot perturb the promotion signals the
  * desktop side reasons about.
  */
-async function fetchKnowledge(url: string | undefined): Promise<KnowledgeSummary | null> {
+async function fetchKnowledge(
+  url: string | undefined,
+  binding?: { fetch: typeof fetch },
+): Promise<KnowledgeSummary | null> {
   if (!url) return null;
 
   // Two accepted shapes, and the difference is a security one.
@@ -75,10 +87,29 @@ async function fetchKnowledge(url: string | undefined): Promise<KnowledgeSummary
   // rather than cambium's entire reach.
   const statusOnly = /\/status\/[^/]+\/?$/.test(url);
 
+  // Dispatch over the service binding when one is configured.
+  //
+  // This is not an optimisation, it is the only thing that works. Cloudflare
+  // does not route a Worker subrequest to a workers.dev hostname: a plain
+  // fetch() to https://cambium-remote.<account>.workers.dev/status/<token> is
+  // answered 404 by the edge and the target Worker never runs at all. From here
+  // that is indistinguishable from a rejected token -- the giveaway is that
+  // cambium-remote's own tail shows ZERO requests, which is what finally
+  // identified it.
+  //
+  // The binding dispatches in-process. The request still arrives at
+  // cambium-remote's normal handler and is still checked against STATUS_TOKEN,
+  // so this changes the transport and nothing about the authorization.
+  //
+  // Global fetch is kept as the fallback: a self-hoster may legitimately point
+  // this at a cambium-remote on a CUSTOM domain, which is routable, or run the
+  // two in different accounts where no binding can exist.
+  const dispatcher: { fetch: typeof fetch } = binding ?? { fetch };
+
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), CAMBIUM_TIMEOUT_MS);
   try {
-    const res = await fetch(url, {
+    const res = await dispatcher.fetch(url, {
       method: statusOnly ? "GET" : "POST",
       signal: ctrl.signal,
       headers: {
@@ -148,6 +179,7 @@ export async function renderView(
   db: D1Database,
   cambiumUrl?: string,
   params?: URLSearchParams,
+  cambiumBinding?: { fetch: typeof fetch },
 ): Promise<string> {
   const all = params?.get("all") === "1";
 
@@ -207,7 +239,7 @@ export async function renderView(
     );
   }
 
-  return renderHome(db, cambiumUrl, params?.get("t") ?? "over");
+  return renderHome(db, cambiumUrl, params?.get("t") ?? "over", cambiumBinding);
 }
 
 function toggleAll(all: boolean, base: string): string {
@@ -220,13 +252,17 @@ async function renderHome(
   db: D1Database,
   cambiumUrl: string | undefined,
   tab: string,
+  cambiumBinding?: { fetch: typeof fetch },
 ): Promise<string> {
   // One rollup query and one feed query. Two round-trips, not two per project:
   // this is rendered on a phone, on mobile data, and a fan-out per project
   // would make the page slower than it is useful.
   // Kicked off before the D1 work so the cross-Worker round trip overlaps it
   // rather than adding to it.
-  const knowledgeP = fetchKnowledge(cambiumUrl);
+  // Started only for the tab that shows it. Kicked off before the D1 work so
+  // the cross-Worker call overlaps the queries rather than adding to them.
+  const knowledgeP =
+    tab === "know" ? fetchKnowledge(cambiumUrl, cambiumBinding) : Promise.resolve(null);
 
   const rollup = await db
     .prepare(
@@ -252,7 +288,7 @@ async function renderHome(
   const projects = (rollup.results ?? []).filter((p) => p.active > 0);
   const entries = (feed.results ?? []).map(hydrate);
 
-  const knowledge = await knowledgeP;
+  const knowledge = tab === "know" ? await knowledgeP : null;
 
   const totals = projects.reduce(
     (a, p) => ({

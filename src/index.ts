@@ -103,7 +103,12 @@ export default {
         // Query params drive detail / project / search pages. They hang off this
         // same path so they inherit this one cookie check rather than adding a
         // second auth surface that can drift out of step.
-        const html = await renderView(env.DB, env.CAMBIUM_STATUS_URL, url.searchParams);
+        const html = await renderView(
+          env.DB,
+          env.CAMBIUM_STATUS_URL,
+          url.searchParams,
+          (env as { CAMBIUM?: { fetch: typeof fetch } }).CAMBIUM,
+        );
         const headers: Record<string, string> = {
           "content-type": "text/html; charset=utf-8",
           // Behind a secret: never store it, never let a shared cache hold it.

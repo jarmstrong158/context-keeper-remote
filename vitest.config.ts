@@ -22,6 +22,18 @@ export default defineConfig({
           AUTH_TOKEN: "test-secret-token",
           VIEW_TOKEN: "view-secret-token",
         },
+        // wrangler.toml declares a service binding to cambium-remote, which
+        // does not exist in a test run -- miniflare refuses to start at all,
+        // with "The Workers runtime failed to start" and no mention of the
+        // binding, so the whole suite dies rather than one test failing.
+        //
+        // Stubbed as an unreachable service on purpose rather than a fake that
+        // returns counts: the Knowledge panel's contract is that a cambium
+        // failure degrades to a stated absence and never breaks the page, and a
+        // stub that always succeeds would stop testing that.
+        serviceBindings: {
+          CAMBIUM: () => new Response("Not Found", { status: 404 }),
+        },
       },
     }),
   ],
