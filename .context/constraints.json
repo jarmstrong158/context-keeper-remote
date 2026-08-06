@@ -104,10 +104,10 @@
   },
   {
     "id": "con-004-69f4",
-    "rule": "Never test a PowerShell Read-Host result directly against -match or -notmatch. Cast to [string] first, and refuse the destructive path outright when [Environment]::UserInteractive is false. A confirmation must fail closed.",
-    "reason": "Read-Host returns $null at EOF, which is every piped, redirected, scheduled, or otherwise non-interactive run. In PowerShell $null -notmatch 'pattern' evaluates to EMPTY rather than $true, so the natural guard if ($answer -notmatch '^[Yy]') { cancel } is falsy on $null and execution falls straight through into the action it was meant to gate. The prompt therefore defaults to yes precisely when no human is present to have said it. Casting to [string] turns $null into the empty string, which the regex correctly fails to match; the UserInteractive check is the belt to that, so the destructive path is unreachable without an explicit flag.",
-    "triggering_incident": "set-view-token.ps1 guarded replacing VIEW_TOKEN behind a Replace it? [y/N] prompt. A captured non-interactive dry run printed the \"A VIEW_TOKEN already exists\" warning and then continued to the install step, with no prompt text and no \"cancelled\" anywhere in the output. Replacing VIEW_TOKEN drops every enrolled device at once and the previous value cannot be recovered, so this failed open onto the single most destructive action in the script. The bug was invisible interactively, because a human answering the prompt makes it behave correctly.",
-    "enforced_by": "scripts/set-view-token.ps1 -- run it with -DryRun through a pipe; it must print cancelled and must not reach the install step without -Yes",
+    "rule": "Never test a PowerShell Read-Host result directly against -match or -notmatch, and never gate on [Environment]::UserInteractive. Cast to [string] first, and detect 'nobody can answer' with [Console]::IsInputRedirected. A confirmation must fail closed.",
+    "reason": "Two independent ways this fails open. (1) Read-Host returns $null at EOF, and $null -notmatch 'pattern' evaluates to EMPTY rather than $true, so the natural guard is falsy and execution falls through into the action it was meant to gate. Casting to [string] turns $null into the empty string, which the regex correctly fails to match. (2) [Environment]::UserInteractive reports only whether the process has a window station. It stays TRUE with stdin on a pipe, a file, or NUL, so a guard written against it never fires at all -- it is dead code that looks like protection. [Console]::IsInputRedirected is the signal that actually answers 'is anything attached to answer this prompt'. A script that then blocks forever on Read-Host is worse than one that errors: there is no output to read and nothing to report.",
+    "triggering_incident": "set-view-token.ps1 guarded replacing VIEW_TOKEN behind a Replace it? [y/N] prompt. A captured non-interactive dry run printed the warning and continued straight to the install step, with no prompt and no cancelled anywhere in the output. The first fix added a UserInteractive check, which was itself dead code -- proven later when set-cambium-url.ps1 used the same guard and hung forever on Read-Host instead of refusing. Only the [string] cast was ever doing any work. Both are now in place, verified by piping empty stdin: the script refuses, and -Yes still proceeds.",
+    "enforced_by": "scripts/set-view-token.ps1 and scripts/set-cambium-url.ps1 -- pipe empty stdin to either; they must refuse or read from stdin, never block and never fall through",
     "scope": "scripts/",
     "hardness": "absolute",
     "related_to": [
@@ -133,8 +133,8 @@
     "schema_version": 4,
     "status": "active",
     "created_at": "2026-08-06T04:34:31.464554+00:00",
-    "updated_at": "2026-08-06T04:34:37.265078+00:00",
-    "verified_at": "2026-08-06T04:34:37.197380+00:00",
-    "verified_sha": "c9716a88eef1fded7055d2a7579e4b519403ca98"
+    "updated_at": "2026-08-06T11:11:10.749723+00:00",
+    "verified_at": "2026-08-06T11:11:10.712511+00:00",
+    "verified_sha": "7920f76f8da4dafceb772779edf9df9b1327af77"
   }
 ]
