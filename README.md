@@ -133,6 +133,16 @@ See [the phone view](#the-phone-view) below.
 constraints. Install it to your home screen and it opens like an app: no login,
 no token in the URL, nothing to remember.
 
+| | |
+|---|---|
+| ![Recent](docs/screenshots/1-recent.png) | ![Entry detail](docs/screenshots/2-entry.png) |
+| **Recent** — what changed, across every project | **Any entry** — the reasoning, not just the title |
+| ![Projects](docs/screenshots/3-projects.png) | ![Health](docs/screenshots/4-health.png) |
+| **Projects** — counts per project, including how much of each rulebook is enforceable | **Health** — mojibake, thin rationale, untagged, stale |
+
+<sub>Synthetic data. Every project and entry above is invented — see
+[docs/screenshots](docs/screenshots/) for the dataset and how to regenerate these.</sub>
+
 It has four tabs, matching the desktop dashboard:
 
 | tab | what it answers |

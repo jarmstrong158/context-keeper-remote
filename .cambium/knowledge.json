@@ -231,6 +231,305 @@
           "context-keeper-remote"
         ]
       }
+    },
+    {
+      "id": "k-6888642d",
+      "type": "memory",
+      "kind": "decision",
+      "content": "cambium-remote gained GET /status/<STATUS_TOKEN>, a status-only credential, and the phone view wires to that rather than to cambium's connector URL. Because the token is generated rather than looked up, a script installs it on both Workers with nothing for a human to paste.",
+      "why": "A second, narrower credential solves the security problem and the automation problem with one mechanism. STATUS_TOKEN grants exactly one read -- the counts -- and cannot call recall or reach the knowledge itself, so the blast radius of the thing now stored in two places is three integers rather than an account's entire promoted knowledge. Because it is generated rather than discovered, a script can mint it, install it on cambium-remote, verify the route answers, and only then install the derived URL on the consumer. Rotation is re-running the script, and it is invisible to every MCP client because it is not the connector token. This is the same shape as VIEW_TOKEN in dec-002 and for the same reason: a surface that needs less access should hold a credential that grants less.  Problem: The Knowledge tab needed CAMBIUM_STATUS_URL, and the only way to supply it was to paste cambium-remote's connector URL out of claude.ai. That URL is cambium-remote's AUTH_TOKEN, which grants recall over every promoted item in the team and org scopes, on the Worker whose team scope reaches every repo under TEAM_OWNER including private ones. Rendering three integers on a phone would have copied a full-access credential into a second Worker, so a leak of the second would disclose the reach of the first. It also could not be automated at all: Cloudflare stores secrets write-only, so AUTH_TOKEN can only ever be re-typed by hand, which is exactly the manual credential handling these setup scripts exist to eliminate.",
+      "tags": [
+        "cambium",
+        "auth",
+        "credentials",
+        "view",
+        "knowledge",
+        "worker",
+        "setup",
+        "least-privilege",
+        "context-keeper"
+      ],
+      "scope": "local",
+      "project": "context-keeper-remote",
+      "source": {
+        "system": "context-keeper",
+        "ref": "dec-004-8f6b"
+      },
+      "created_by": "jonny-desktop",
+      "created_at": "2026-08-06T16:54:14.401189+00:00",
+      "updated_at": "2026-08-06T16:54:14.401189+00:00",
+      "status": "active",
+      "trust": {
+        "recalls": 0,
+        "endorsements": [],
+        "projects": [
+          "context-keeper-remote"
+        ]
+      }
+    },
+    {
+      "id": "k-b9610849",
+      "type": "memory",
+      "kind": "decision",
+      "content": "connect-cambium deploys cambium-remote itself when the status route is missing, rather than telling the operator to. That removes cambium-remote's broken CI from the critical path; repairing that CI is a separate, optional script.",
+      "why": "wrangler is already authenticated on the machine running the script -- it is the same login being used to write secrets on both Workers -- so deploying is available at zero additional credential cost. Doing it there converts a blocking prerequisite into a step the tool handles, and makes the feature independent of a CI pipeline it does not otherwise need. It is scoped tightly: it fires only when the route has already failed to answer for 60 seconds, it deploys that repo's own checked-out main and nothing of this repo's, and -SkipDeploy opts out. Repairing the CI is then genuinely optional, which is the correct priority -- auto-deploy on push is a convenience, while the Knowledge tab working is the actual goal.  Problem: The Knowledge tab could not be wired because cambium-remote had never been deployed with its /status route: its GitHub Actions deploy fails on every merge with empty CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID secrets, and fails green enough that nobody noticed. The setup script detected the missing route and printed \"deploy it, then re-run this\" -- which is homework, and homework that presupposed knowing the CI was broken. The operator's position was that a setup script exists precisely so none of that lands on them.",
+      "tags": [
+        "setup",
+        "deploy",
+        "ci",
+        "cambium",
+        "automation",
+        "ux",
+        "context-keeper"
+      ],
+      "scope": "local",
+      "project": "context-keeper-remote",
+      "source": {
+        "system": "context-keeper",
+        "ref": "dec-005-f67d"
+      },
+      "created_by": "jonny-desktop",
+      "created_at": "2026-08-06T16:54:14.401189+00:00",
+      "updated_at": "2026-08-06T16:54:14.401189+00:00",
+      "status": "active",
+      "trust": {
+        "recalls": 0,
+        "endorsements": [],
+        "projects": [
+          "context-keeper-remote"
+        ]
+      }
+    },
+    {
+      "id": "k-da06241b",
+      "type": "memory",
+      "kind": "decision",
+      "content": "Deployment happens from a git pre-push hook using the local wrangler login, not from GitHub Actions. The Cloudflare API token that CI requires cannot be created by any credential on the machine, so the answer was to stop needing it rather than to automate obtaining it.",
+      "why": "Checking rather than assuming showed the loop genuinely cannot be closed: minting a Cloudflare API token through the API requires an existing token carrying User API Tokens: Edit, and wrangler's OAuth session holds 29 scopes covering workers, d1, pages, queues and account:read with nothing token-management related. Since no credential on the machine can create that credential, automating the paste is impossible and the real move is to remove the requirement. A pre-push hook deploys with the login that is already present and already used for every secret write in these scripts, so the credential cost is zero. The pre-push ordering is the substantive part: it deploys first and aborts the push on failure, so origin never receives a commit that could not be deployed -- the exact inverse of the failure it replaces, where CI accepted every merge and deployed none.  Problem: cambium-remote's GitHub Actions deploy fails on every merge with empty CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID, and fails invisibly enough that main drifted ahead of the running Worker for an unknown period. The obvious repair is to set those secrets, but the operator's requirement was full automation with no manual credential step, and the token half appeared to be an irreducible human action.",
+      "tags": [
+        "deploy",
+        "ci",
+        "git-hooks",
+        "cloudflare",
+        "automation",
+        "credentials",
+        "context-keeper"
+      ],
+      "scope": "local",
+      "project": "context-keeper-remote",
+      "source": {
+        "system": "context-keeper",
+        "ref": "dec-006-1114"
+      },
+      "created_by": "jonny-desktop",
+      "created_at": "2026-08-06T16:54:14.401189+00:00",
+      "updated_at": "2026-08-06T16:54:14.401189+00:00",
+      "status": "active",
+      "trust": {
+        "recalls": 0,
+        "endorsements": [],
+        "projects": [
+          "context-keeper-remote"
+        ]
+      }
+    },
+    {
+      "id": "k-e007ff4c",
+      "type": "memory",
+      "kind": "constraint",
+      "content": "Never confirm a deploy with `gh run list --limit 1`. Filter by workflow (`--workflow=deploy.yml`) and check that the run's headSha matches the commit you expect. A repo with CI and Deploy workflows returns whichever finished last, which is usually CI.",
+      "why": "The unfiltered list is ordered by recency across ALL workflows. CI is faster than Deploy, so it almost always finishes first and appears at the top. Reading that as the deploy result reports success while the deploy is still running or has already failed. The failure is silent and durable: the code is merged, main looks correct, tests pass, and every later diagnosis proceeds on the false premise that the running Worker matches the source. Confirming the headSha as well catches the second version of the same mistake, where the right workflow succeeded but for an earlier commit.",
+      "tags": [
+        "deploy",
+        "ci",
+        "verification",
+        "gotcha",
+        "cloudflare",
+        "github-actions",
+        "context-keeper"
+      ],
+      "scope": "local",
+      "project": "context-keeper-remote",
+      "source": {
+        "system": "context-keeper",
+        "ref": "con-005-d300"
+      },
+      "created_by": "jonny-desktop",
+      "created_at": "2026-08-06T16:54:14.402188+00:00",
+      "updated_at": "2026-08-06T16:54:14.402188+00:00",
+      "status": "active",
+      "trust": {
+        "recalls": 0,
+        "endorsements": [],
+        "projects": [
+          "context-keeper-remote"
+        ]
+      }
+    },
+    {
+      "id": "k-d3ba53b8",
+      "type": "memory",
+      "kind": "constraint",
+      "content": "Never verify a Cloudflare secret immediately after setting it. `wrangler secret put` creates a new Worker version and rolls it out, so for up to a minute some edges still serve the previous version holding the previous value. Poll for at least 60 seconds, and never let the failure message assert a single cause.",
+      "why": "A secret change is a deployment, not a database write. Until the new version reaches a given edge, requests there authenticate against the OLD secret, so a correct new token legitimately returns 404 for a while. A short verification window therefore reports a wrong-credential failure for a credential that is correct, and the natural next step -- redeploying, regenerating, or blaming the route -- chases a problem that does not exist. The message matters as much as the timeout: asserting one cause (\"it has not been deployed\") is confidently wrong half the time, and a wrong diagnosis printed by the tool itself is followed for far longer than no diagnosis at all.",
+      "tags": [
+        "cloudflare",
+        "wrangler",
+        "secrets",
+        "propagation",
+        "gotcha",
+        "scripts",
+        "verification",
+        "context-keeper"
+      ],
+      "scope": "local",
+      "project": "context-keeper-remote",
+      "source": {
+        "system": "context-keeper",
+        "ref": "con-006-f0f1"
+      },
+      "created_by": "jonny-desktop",
+      "created_at": "2026-08-06T16:54:14.402188+00:00",
+      "updated_at": "2026-08-06T16:54:14.402188+00:00",
+      "status": "active",
+      "trust": {
+        "recalls": 0,
+        "endorsements": [],
+        "projects": [
+          "context-keeper-remote"
+        ]
+      }
+    },
+    {
+      "id": "k-1aa98468",
+      "type": "memory",
+      "kind": "constraint",
+      "content": "A Worker cannot reach another Worker by fetching its workers.dev hostname. Use a service binding. Declare it in BOTH the top-level and the named-environment section, since named environments inherit nothing.",
+      "why": "Cloudflare does not route a Worker subrequest to a workers.dev host: the edge answers 404 and the target Worker never executes. From the calling side that is byte-identical to the target rejecting the credential, so the obvious diagnosis is a wrong or unpropagated token, and every fix aimed there is aimed at nothing. The only signal that distinguishes them is the absence of ANY request in the target's own logs. A service binding dispatches in-process -- no DNS, TLS, or egress -- and the request still arrives at the target's normal handler and is still checked against its secret, so the binding replaces the transport and changes nothing about authorization. Keep a plain-fetch fallback for a target on a custom domain, which is routable, or one in another account where no binding can exist.",
+      "tags": [
+        "cloudflare",
+        "workers",
+        "service-binding",
+        "networking",
+        "gotcha",
+        "cambium",
+        "context-keeper"
+      ],
+      "scope": "local",
+      "project": "context-keeper-remote",
+      "source": {
+        "system": "context-keeper",
+        "ref": "con-007-1de7"
+      },
+      "created_by": "jonny-desktop",
+      "created_at": "2026-08-06T16:54:14.402188+00:00",
+      "updated_at": "2026-08-06T16:54:14.402188+00:00",
+      "status": "active",
+      "trust": {
+        "recalls": 0,
+        "endorsements": [],
+        "projects": [
+          "context-keeper-remote"
+        ]
+      }
+    },
+    {
+      "id": "k-57532ca8",
+      "type": "memory",
+      "kind": "constraint",
+      "content": "Nothing that names another Worker, another account, or a pinned resource id may appear in the TOP-LEVEL wrangler.toml. That config is what the Deploy to Cloudflare button runs, in an account that has none of those things. Put it under [env.production], and remember named environments inherit nothing.",
+      "why": "The top-level profile exists so a stranger's one-click deploy provisions its own resources: the D1 binding deliberately omits database_id for exactly this reason. A service binding is the opposite kind of declaration -- it names a target by name, and Cloudflare rejects the deploy when that Worker does not exist in the deploying account. So a top-level [[services]] breaks the self-host path for everyone except the maintainer, and breaks it at the button, before the deployer has any context for the error. The inheritance direction compounds it: named environments inherit NOTHING, so a binding placed only at the top level is also silently absent from the env CI actually deploys. Both halves have to be got right, and they fail in opposite directions.",
+      "tags": [
+        "wrangler",
+        "cloudflare",
+        "self-host",
+        "config",
+        "deploy",
+        "service-binding",
+        "context-keeper"
+      ],
+      "scope": "local",
+      "project": "context-keeper-remote",
+      "source": {
+        "system": "context-keeper",
+        "ref": "con-008-a0aa"
+      },
+      "created_by": "jonny-desktop",
+      "created_at": "2026-08-06T16:54:14.402188+00:00",
+      "updated_at": "2026-08-06T16:54:14.402188+00:00",
+      "status": "active",
+      "trust": {
+        "recalls": 0,
+        "endorsements": [],
+        "projects": [
+          "context-keeper-remote"
+        ]
+      }
+    },
+    {
+      "id": "k-87822564",
+      "type": "memory",
+      "kind": "constraint",
+      "content": "Never emit or run a bare `wrangler deploy` for a repo that declares named environments. Always pass --env explicitly. Any tool that generates a deploy command must refuse to proceed when environments exist and none was named.",
+      "why": "A bare deploy targets the TOP-LEVEL config, and in these repos the top level is the self-host profile: it omits database_id on purpose so Cloudflare auto-provisions a fresh D1 for each one-click deployer. Running it against the maintainer's Worker therefore rebinds a live, populated Worker to a brand-new EMPTY database. Nothing errors, nothing warns, and the deploy reports success -- the data is still in the old database but the Worker no longer points at it, so the failure presents as total data loss. The blast radius is maximal and the signal is zero, which is why the generating tool has to fail closed rather than warn.",
+      "tags": [
+        "wrangler",
+        "deploy",
+        "d1",
+        "data-loss",
+        "git-hooks",
+        "fail-closed",
+        "context-keeper"
+      ],
+      "scope": "local",
+      "project": "context-keeper-remote",
+      "source": {
+        "system": "context-keeper",
+        "ref": "con-009-2f52"
+      },
+      "created_by": "jonny-desktop",
+      "created_at": "2026-08-06T16:54:14.402188+00:00",
+      "updated_at": "2026-08-06T16:54:14.402188+00:00",
+      "status": "active",
+      "trust": {
+        "recalls": 0,
+        "endorsements": [],
+        "projects": [
+          "context-keeper-remote"
+        ]
+      }
+    },
+    {
+      "id": "k-3ba919ae",
+      "type": "memory",
+      "kind": "constraint",
+      "content": "There is exactly one HTML escaper, in src/html.ts. Never define a second one, and never inline an escape in a template. Every string the view renders comes from the store and must pass through it.",
+      "why": "The escaper is the only thing between a recorded string and the rendered page, and the store holds whatever a project wrote -- including text a future contributor pastes from an untrusted source. Copies of it are not merely duplication: they only have to agree until somebody improves one, and the copy that drifts is the one nobody re-reads, so the divergence surfaces as an XSS hole rather than as a failing test. It must also escape both quote characters, not just the angle brackets, because these templates interpolate into attribute values as well as text nodes -- an href attribute built from an entry id is safe only because the double quote is covered.",
+      "tags": [
+        "security",
+        "xss",
+        "html",
+        "view",
+        "duplication",
+        "context-keeper"
+      ],
+      "scope": "local",
+      "project": "context-keeper-remote",
+      "source": {
+        "system": "context-keeper",
+        "ref": "con-010-4839"
+      },
+      "created_by": "jonny-desktop",
+      "created_at": "2026-08-06T16:54:14.402188+00:00",
+      "updated_at": "2026-08-06T16:54:14.402188+00:00",
+      "status": "active",
+      "trust": {
+        "recalls": 0,
+        "endorsements": [],
+        "projects": [
+          "context-keeper-remote"
+        ]
+      }
     }
   ],
   "imported": {
@@ -241,7 +540,16 @@
       "con-002-b4cc",
       "dec-003-0a24",
       "con-003-163b",
-      "con-004-69f4"
+      "con-004-69f4",
+      "dec-004-8f6b",
+      "dec-005-f67d",
+      "dec-006-1114",
+      "con-005-d300",
+      "con-006-f0f1",
+      "con-007-1de7",
+      "con-008-a0aa",
+      "con-009-2f52",
+      "con-010-4839"
     ],
     "agentsync": [],
     "agentsync_last": {},
