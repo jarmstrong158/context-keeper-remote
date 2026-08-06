@@ -14,6 +14,12 @@ declare namespace Cloudflare {
     // from AUTH_TOKEN on purpose: the view URL gets opened on a phone, where a
     // read/write credential does not belong. Unset => the route 404s.
     VIEW_TOKEN?: string;
+    // Full cambium-remote MCP URL including its path token, e.g.
+    // https://cambium-remote.<sub>.workers.dev/mcp/<token>. Optional: unset
+    // means the view states that knowledge lives elsewhere rather than
+    // pretending the decision logs are everything. That Worker is read-only
+    // and its status call performs no writes.
+    CAMBIUM_STATUS_URL?: string;
   }
 }
 

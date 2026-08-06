@@ -467,6 +467,14 @@ describe("read-only view (/view/:token)", () => {
     expect(body).toContain("&lt;img src=x");
   });
 
+  it("states where knowledge lives when cambium is not wired", async () => {
+    // Absence is stated, not implied. A page showing only decision logs while
+    // looking complete is the failure being avoided.
+    const body = await (await getView()).text();
+    expect(body).toContain("CAMBIUM_STATUS_URL");
+    expect(body).toContain("desktop-only");
+  });
+
   it("never leaks either token into the page", async () => {
     const body = await (await getView()).text();
     expect(body).not.toContain(VIEW);

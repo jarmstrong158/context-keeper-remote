@@ -60,7 +60,7 @@ export default {
       }
       try {
         await runMigrations(env.DB);
-        const html = await renderView(env.DB);
+        const html = await renderView(env.DB, env.CAMBIUM_STATUS_URL);
         return new Response(request.method === "HEAD" ? null : html, {
           headers: {
             "content-type": "text/html; charset=utf-8",
