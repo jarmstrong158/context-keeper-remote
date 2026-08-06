@@ -330,6 +330,17 @@ if ($code -eq 200) {
 }
 
 # --- 7. hand it over ------------------------------------------------------
+# Saved to disk so nobody has to remember it. Cloudflare stores secrets
+# write-only, so if the clipboard were the only copy, one stray Ctrl-C would
+# mean re-running setup and dropping every enrolled device. Every CLI keeps its
+# own token on disk -- npm, gh, aws, wrangler -- and it is strictly better than
+# asking a person to hold a 43-character secret. .view-url is gitignored.
+$saved = $false
+try {
+    Set-Content -Path (Join-Path $repo ".view-url") -Value $viewUrl -Encoding UTF8 -NoNewline
+    $saved = $true
+} catch { }
+
 $copied = $false
 try { Set-Clipboard -Value $viewUrl; $copied = $true } catch { }
 
@@ -337,11 +348,36 @@ Write-Host ""
 Write-Host "  done." -ForegroundColor Green
 Say "token : $mask   (32 bytes; never printed in full)"
 Say "url   : $WorkerUrl/view/$mask"
-if ($copied) {
-    Write-Host "  The full URL is on your clipboard." -ForegroundColor Cyan
-} else {
-    Write-Host "  Clipboard unavailable. The token cannot be read back from" -ForegroundColor Yellow
+if ($copied) { Write-Host "  The full URL is on your clipboard." -ForegroundColor Cyan }
+if ($saved)  { Write-Host "  Saved. Reopen it any time with: npm run view" -ForegroundColor Cyan }
+if (-not $copied -and -not $saved) {
+    Write-Host "  Could not save or copy it. The token cannot be read back from" -ForegroundColor Yellow
     Write-Host "  Cloudflare, so re-run this script to get a usable URL." -ForegroundColor Yellow
+}
+
+# --- 8. enrol the phone ---------------------------------------------------
+# The QR is what makes this install-once on a phone. Without it, getting the
+# view onto a handset means transferring a 43-character secret by hand -- typing
+# it, or mailing it to yourself, which is both friction and a new place the
+# credential lives. Point the camera at the screen instead.
+#
+# Piped to STDIN, not passed as an argument: argv is visible in the process list
+# (con-001), and the QR step would otherwise have quietly broken the rule the
+# rest of this script exists to keep.
+if ($code -eq 200) {
+    Write-Host ""
+    Write-Host "  Scan this with your phone camera, then Add to Home Screen:" -ForegroundColor Cyan
+    Write-Host ""
+    # node directly, not via Invoke-Wrangler (that helper is wrangler-specific),
+    # but with the same stderr guard: node writing a warning must not be fatal.
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { $viewUrl | & node (Join-Path $repo "scripts/show-qr.mjs") 2>&1 | Out-Host }
+    catch { Say "(QR unavailable: $($_.Exception.Message))" }
+    finally { $ErrorActionPreference = $prev }
+    Write-Host ""
+    Say "Once it is on your home screen, it opens without the token in the URL"
+    Say "and stays signed in. Nothing further to remember."
 }
 
 if (-not $NoBrowser -and $code -eq 200) {

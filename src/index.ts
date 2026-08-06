@@ -17,6 +17,7 @@ import { pathTokenMatches } from "./shared/mcp-core";
 import { ALL_TOOLS } from "./tools";
 import { log } from "./log";
 import { renderView } from "./view";
+import { cookieAuthorised, iconResponse, manifestJson, sessionCookie } from "./install";
 
 const server = new McpServer({ name: "context-keeper-remote", version: "1.0.0" });
 server.registerAll(ALL_TOOLS);
@@ -44,13 +45,52 @@ export default {
     // connector token is read/write over every project (see src/view.ts).
     const view = /^\/view\/([^/]+)\/?$/.exec(url.pathname);
 
-    if (view) {
-      log("request", { route: "/view/***", method: request.method });
+    // The installable surface. Three ways in, one credential behind all of them:
+    //
+    //   /view/<VIEW_TOKEN>  enrol   - proves possession, hands back a cookie
+    //   /view               use     - the cookie proves it; what the icon opens
+    //   /view/icon.png etc  assets  - cookie only, never a token in the URL
+    //
+    // Order matters: the literal asset paths also match /^\/view\/([^/]+)$/, so
+    // they must be handled before that pattern treats "icon.png" as a token and
+    // 404s the icon of an app that is otherwise working.
+    if (url.pathname === "/view/icon.png" || url.pathname === "/view/manifest.webmanifest") {
+      log("request", { route: url.pathname, method: request.method });
+      // Assets authenticate on the cookie alone. The <link rel="manifest"> in
+      // the page carries crossorigin="use-credentials" so the browser sends it.
+      const ok = await cookieAuthorised(request, env.VIEW_TOKEN);
+      log("auth", { ok, surface: "view-asset" });
+      if (!ok) return notFound();
+      if (request.method !== "GET" && request.method !== "HEAD") {
+        return new Response("Method Not Allowed", { status: 405, headers: { allow: "GET, HEAD" } });
+      }
+      if (url.pathname === "/view/icon.png") return iconResponse();
+      return new Response(manifestJson(), {
+        headers: {
+          "content-type": "application/manifest+json; charset=utf-8",
+          "cache-control": "private, max-age=3600",
+        },
+      });
+    }
+
+    // /view and /view/ -- the installed entry point, cookie-authenticated.
+    const viewBare = url.pathname === "/view" || url.pathname === "/view/";
+
+    if (view || viewBare) {
+      log("request", { route: view ? "/view/***" : "/view", method: request.method });
       // VIEW_TOKEN unset => the feature is off => indistinguishable from any
       // other unknown path. Never falls back to AUTH_TOKEN: a second credential
       // that silently accepts the first is not a second credential.
-      const viewOk = await pathTokenMatches(view[1], env.VIEW_TOKEN);
-      log("auth", { ok: viewOk, surface: "view" });
+      //
+      // A token in the path is what enrols a device; a cookie is what a device
+      // presents afterwards. Both compare against the same secret, so rotating
+      // VIEW_TOKEN revokes every device at once and there is no second
+      // revocation path to forget about.
+      const enrolling = Boolean(view);
+      const viewOk = enrolling
+        ? await pathTokenMatches(view![1], env.VIEW_TOKEN)
+        : await cookieAuthorised(request, env.VIEW_TOKEN);
+      log("auth", { ok: viewOk, surface: "view", enrolling });
       if (!viewOk) return notFound();
       if (request.method !== "GET" && request.method !== "HEAD") {
         return new Response("Method Not Allowed", {
@@ -61,18 +101,22 @@ export default {
       try {
         await runMigrations(env.DB);
         const html = await renderView(env.DB, env.CAMBIUM_STATUS_URL);
-        return new Response(request.method === "HEAD" ? null : html, {
-          headers: {
-            "content-type": "text/html; charset=utf-8",
-            // Behind a secret: never store it, never let a shared cache hold it.
-            "cache-control": "private, no-store",
-            "referrer-policy": "no-referrer",
-            "x-robots-tag": "noindex, nofollow",
-            // Nothing here loads or executes anything; say so.
-            "content-security-policy":
-              "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'",
-          },
-        });
+        const headers: Record<string, string> = {
+          "content-type": "text/html; charset=utf-8",
+          // Behind a secret: never store it, never let a shared cache hold it.
+          "cache-control": "private, no-store",
+          "referrer-policy": "no-referrer",
+          "x-robots-tag": "noindex, nofollow",
+          // The page loads its own icon and manifest now, so 'none' no longer
+          // covers it. Still no script, no network, no framing, no forms.
+          "content-security-policy":
+            "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; " +
+            "manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+        };
+        // Re-issued on every enrolling visit, which also refreshes the ten-year
+        // window -- so a device that keeps being used never has to be re-enrolled.
+        if (enrolling) headers["set-cookie"] = sessionCookie(view![1]);
+        return new Response(request.method === "HEAD" ? null : html, { headers });
       } catch (err) {
         log("error", {
           surface: "view",

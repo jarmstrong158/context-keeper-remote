@@ -233,7 +233,17 @@ export async function renderView(
 <meta name="referrer" content="no-referrer">
 <meta name="color-scheme" content="dark light">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="memory">
+<meta name="theme-color" content="#0b0e13">
 <title>memory</title>
+<!-- Installability. crossorigin="use-credentials" is load-bearing: a manifest is
+     fetched WITHOUT cookies by default, so behind a credential it would 404 and
+     the install prompt would silently never appear. The icon is an ordinary
+     same-origin image request and carries the cookie on its own. -->
+<link rel="manifest" href="/view/manifest.webmanifest" crossorigin="use-credentials">
+<link rel="apple-touch-icon" href="/view/icon.png">
+<link rel="icon" type="image/png" href="/view/icon.png">
 <style>
 :root{--bg:#0b0e13;--pan:#12161d;--line:#222934;--ink:#e7edf5;--dim:#8b97a8;
  --dim2:#5f6a7a;--ac:#2dd4bf;--ac2:#7c9cf5;--warn:#f0b429}
