@@ -32,5 +32,39 @@
     "updated_at": "2026-08-06T03:22:18.617977+00:00",
     "verified_at": "2026-08-06T03:22:18.581754+00:00",
     "verified_sha": "62a363440abadfae5be7927f98c83c3462757b14"
+  },
+  {
+    "id": "con-002-b4cc",
+    "rule": "In Windows PowerShell 5.1, never use 2>&1 on a native command while $ErrorActionPreference is 'Stop'. Route native calls through a helper that drops the preference to 'Continue' for the duration of the call and restores it in a finally block.",
+    "reason": "5.1 does not merely merge streams for a native command: it wraps each stderr line in an ErrorRecord, and under 'Stop' the first record is a terminating error. The exit code is irrelevant -- a process that returns 0 still kills the script if it wrote a single line to stderr. Tools that print progress, banners, or update notices to stderr are therefore fatal to any script that redirects them, and the failure is deeply misleading: the error text shown is the tool's own benign warning, so it reads as the tool having failed rather than as a redirection bug in the caller.",
+    "triggering_incident": "set-view-token.ps1 died before wrangler ever ran. The terminating error was an npm notice -- \"the following package was not found and will be installed\" -- a warning, not a failure. Because the message named npm, the obvious reading was that npm had broken; the actual cause was 2>&1 in the caller. Reproduced deterministically, then fixed with an Invoke-Wrangler helper and re-verified against wrangler triggers deploy --dry-run, which does write WARNING to stderr and now survives.",
+    "enforced_by": "scripts/set-view-token.ps1::Invoke-Wrangler -- every wrangler invocation must go through it; a bare '& npx wrangler ... 2>&1' in that file is the violation",
+    "scope": "scripts/",
+    "hardness": "absolute",
+    "related_to": [
+      "con-001-7fb5"
+    ],
+    "tags": [
+      "powershell",
+      "windows",
+      "scripts",
+      "stderr",
+      "gotcha",
+      "tooling"
+    ],
+    "retrieval_hints": [
+      "script failed with an npm warning as the error",
+      "PowerShell threw on a command that exited 0",
+      "NativeCommandError from a native executable",
+      "2>&1 breaks my PowerShell script",
+      "wrangler warning killed the run"
+    ],
+    "origin": "agent",
+    "schema_version": 4,
+    "status": "active",
+    "created_at": "2026-08-06T03:30:48.457433+00:00",
+    "updated_at": "2026-08-06T03:30:55.271975+00:00",
+    "verified_at": "2026-08-06T03:30:55.233409+00:00",
+    "verified_sha": "22f7fd1eba3da7fe67446cd3a6cb60f3ab3ea1ef"
   }
 ]
