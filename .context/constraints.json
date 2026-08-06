@@ -347,5 +347,39 @@
     "updated_at": "2026-08-06T16:44:38.627405+00:00",
     "verified_at": "2026-08-06T16:44:38.594365+00:00",
     "verified_sha": "885d58cda9b6aa9e9e143e4881cb0ecd131a3aca"
+  },
+  {
+    "id": "con-011-190a",
+    "rule": "Never screenshot a real store for a public repo. Render from a committed synthetic dataset, and check the source database for stray projects before capturing.",
+    "reason": "A screenshot of the live view publishes project names and decision summaries permanently, and it is the easiest kind of leak to miss because it does not look like data: nobody greps a PNG before pushing, no diff shows its contents, and it survives in git history after the file is deleted. The same repo already had to force-remove a proposal file that carried content from a private project and one with no remote at all. Rendering from a committed seed also makes the images reproducible rather than one-off artifacts, which matters because screenshots go stale silently -- the UI they depict changes and nothing fails.",
+    "triggering_incident": "Adding README screenshots for the phone view. The obvious source was the live instance, which holds 34 projects including private repos and ones with no remote. Rendered from an invented four-project store instead, seeded from docs/screenshots/seed.sql. The local dev database was inspected first and contained a leftover e2e-mirror-test project from an earlier run, caught only because the header read '5 projects' when four had been seeded -- harmless content, but proof that the source needs checking rather than assuming.",
+    "enforced_by": "docs/screenshots/seed.sql is the only data source; docs/screenshots/README.md documents the procedure",
+    "scope": "docs/screenshots",
+    "hardness": "absolute",
+    "related_to": [
+      "con-010-4839",
+      "dec-002-ca5b"
+    ],
+    "tags": [
+      "privacy",
+      "docs",
+      "screenshots",
+      "public-repo",
+      "leak"
+    ],
+    "retrieval_hints": [
+      "can I screenshot the dashboard for the readme",
+      "screenshots leaking private project names",
+      "how were the readme images made",
+      "regenerate the screenshots",
+      "demo data for the view"
+    ],
+    "origin": "agent",
+    "schema_version": 4,
+    "status": "active",
+    "created_at": "2026-08-06T17:35:34.562583+00:00",
+    "updated_at": "2026-08-06T17:35:44.326530+00:00",
+    "verified_at": "2026-08-06T17:35:44.292999+00:00",
+    "verified_sha": "c4f760780864077defeff12d009ed137ae22b8cd"
   }
 ]
