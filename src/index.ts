@@ -100,7 +100,10 @@ export default {
       }
       try {
         await runMigrations(env.DB);
-        const html = await renderView(env.DB, env.CAMBIUM_STATUS_URL);
+        // Query params drive detail / project / search pages. They hang off this
+        // same path so they inherit this one cookie check rather than adding a
+        // second auth surface that can drift out of step.
+        const html = await renderView(env.DB, env.CAMBIUM_STATUS_URL, url.searchParams);
         const headers: Record<string, string> = {
           "content-type": "text/html; charset=utf-8",
           // Behind a secret: never store it, never let a shared cache hold it.
@@ -110,8 +113,11 @@ export default {
           // The page loads its own icon and manifest now, so 'none' no longer
           // covers it. Still no script, no network, no framing, no forms.
           "content-security-policy":
-            "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; " +
-            "manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+            // form-action 'self' is new: the search box is a GET form posting back
+          // to /view. Everything else stays shut -- still no script, no network,
+          // no framing.
+          "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; " +
+            "manifest-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
         };
         // Re-issued on every enrolling visit, which also refreshes the ten-year
         // window -- so a device that keeps being used never has to be re-enrolled.
