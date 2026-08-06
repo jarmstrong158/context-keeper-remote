@@ -349,7 +349,15 @@ if ($code -eq 200) {
 # asking a person to hold a 43-character secret. .view-url is gitignored.
 $saved = $false
 try {
-    Set-Content -Path (Join-Path $repo ".view-url") -Value $viewUrl -Encoding UTF8 -NoNewline
+    # UTF-8 WITHOUT a byte order mark. PowerShell 5.1's -Encoding UTF8 always
+    # writes one, and those three bytes land at the START of the file -- so
+    # anything reading it back gets an invisible leading character before the
+    # "h" of https. It fails a startsWith("https://") check and fails as a URL,
+    # while looking perfectly correct in an editor or on screen. That broke both
+    # `npm run view` and a plain `curl "$(cat .view-url)"`, identically and
+    # silently.
+    [IO.File]::WriteAllText((Join-Path $repo ".view-url"), $viewUrl,
+        (New-Object System.Text.UTF8Encoding $false))
     $saved = $true
 } catch { }
 
@@ -382,11 +390,25 @@ if ($code -eq 200) {
     Write-Host ""
     # node directly, not via Invoke-Wrangler (that helper is wrangler-specific),
     # but with the same stderr guard: node writing a warning must not be fatal.
+    #
+    # The console encoding is load-bearing. The QR is drawn with the half-block
+    # characters U+2580 / U+2584 / U+2588, emitted as UTF-8. A Windows console
+    # defaults to codepage 437, decodes each three-byte sequence as three
+    # separate characters, and prints dense garbage no camera can read. It looks
+    # exactly like the QR failed to generate; it generated fine and was
+    # destroyed on the way to the screen.
     $prev = $ErrorActionPreference
+    $prevEnc = [Console]::OutputEncoding
     $ErrorActionPreference = 'Continue'
-    try { $viewUrl | & node (Join-Path $repo "scripts/show-qr.mjs") 2>&1 | Out-Host }
+    try {
+        try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false } catch { }
+        $viewUrl | & node (Join-Path $repo "scripts/show-qr.mjs") 2>&1 | Out-Host
+    }
     catch { Say "(QR unavailable: $($_.Exception.Message))" }
-    finally { $ErrorActionPreference = $prev }
+    finally {
+        $ErrorActionPreference = $prev
+        try { [Console]::OutputEncoding = $prevEnc } catch { }
+    }
     Write-Host ""
     Say "Once it is on your home screen, it opens without the token in the URL"
     Say "and stays signed in. Nothing further to remember."
