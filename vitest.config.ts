@@ -14,9 +14,14 @@ export default defineConfig({
       isolatedStorage: false,
       wrangler: { configPath: "./wrangler.toml" },
       miniflare: {
-        // AUTH_TOKEN is a production secret; supply a fixed one for tests so the
-        // SELF.fetch auth path works.
-        bindings: { AUTH_TOKEN: "test-secret-token" },
+        // Both are production secrets; supply fixed ones so the SELF.fetch
+        // auth paths work. They are DIFFERENT values on purpose -- the tests
+        // assert each route refuses the other's token, which is the whole
+        // reason the view has its own credential.
+        bindings: {
+          AUTH_TOKEN: "test-secret-token",
+          VIEW_TOKEN: "view-secret-token",
+        },
       },
     }),
   ],

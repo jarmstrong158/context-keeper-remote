@@ -387,6 +387,101 @@ describe("supersession round-trip", () => {
   });
 });
 
+
+describe("read-only view (/view/:token)", () => {
+  // The point of this route is that it is a SEPARATE, LOWER-VALUE credential.
+  // A dashboard URL gets opened on a phone, so it ends up in history, tab sync
+  // and screenshots; the connector token is read/write over every project. If
+  // the two were interchangeable the separation would be decorative, so the
+  // first three tests are about exactly that.
+  const VIEW = "view-secret-token";
+
+  async function getView(token = VIEW, method = "GET") {
+    return SELF.fetch(`https://w.example.com/view/${token}`, { method });
+  }
+
+  it("serves HTML for the view token", async () => {
+    const p = project("viewable");
+    await callTool("record_decision", {
+      project: p,
+      summary: "a decision that should appear in the feed",
+    });
+    const res = await getView();
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/html");
+    const body = await res.text();
+    expect(body).toContain("a decision that should appear in the feed");
+    expect(body).toContain(p);
+  });
+
+  it("REFUSES the connector token", async () => {
+    // Otherwise the phone URL is as dangerous as the write credential.
+    const res = await getView(TOKEN);
+    expect(res.status).toBe(404);
+  });
+
+  it("the connector route refuses the view token", async () => {
+    // ...and the separation has to hold in both directions.
+    const res = await rpc("tools/list", {}, VIEW);
+    expect(res.status).toBe(404);
+  });
+
+  it("rejects a wrong token with a bare 404", async () => {
+    const res = await getView("not-the-view-token");
+    expect(res.status).toBe(404);
+    expect(await res.text()).toBe("Not Found");
+  });
+
+  it("is read-only: refuses anything but GET/HEAD", async () => {
+    for (const method of ["POST", "PUT", "DELETE", "PATCH"]) {
+      const res = await getView(VIEW, method);
+      expect(res.status, method).toBe(405);
+    }
+  });
+
+  it("tells caches and crawlers to keep away", async () => {
+    const res = await getView();
+    expect(res.headers.get("cache-control")).toContain("no-store");
+    expect(res.headers.get("cache-control")).toContain("private");
+    expect(res.headers.get("x-robots-tag")).toContain("noindex");
+    expect(res.headers.get("referrer-policy")).toBe("no-referrer");
+  });
+
+  it("loads and executes nothing", async () => {
+    // A page rendered from arbitrary recorded prose, opened on a phone: no
+    // scripts, no external fetches, nothing to inject into.
+    const body = await (await getView()).text();
+    expect(body).not.toContain("<script");
+    expect(body).not.toContain("http://");
+    expect(body).not.toMatch(/src\s*=/);
+  });
+
+  it("escapes entry text rather than rendering it", async () => {
+    const p = project("xss");
+    await callTool("record_decision", {
+      project: p,
+      summary: "<img src=x onerror=alert(1)> & \"quoted\"",
+    });
+    const body = await (await getView()).text();
+    expect(body).not.toContain("<img src=x");
+    expect(body).toContain("&lt;img src=x");
+  });
+
+  it("states where knowledge lives when cambium is not wired", async () => {
+    // Absence is stated, not implied. A page showing only decision logs while
+    // looking complete is the failure being avoided.
+    const body = await (await getView()).text();
+    expect(body).toContain("CAMBIUM_STATUS_URL");
+    expect(body).toContain("desktop-only");
+  });
+
+  it("never leaks either token into the page", async () => {
+    const body = await (await getView()).text();
+    expect(body).not.toContain(VIEW);
+    expect(body).not.toContain(TOKEN);
+  });
+});
+
 describe("query filters", () => {
   it("filters by tags, text, status, and id", async () => {
     const p = project("filter");
