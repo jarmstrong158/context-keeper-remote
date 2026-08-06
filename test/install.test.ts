@@ -98,16 +98,35 @@ describe("installable assets", () => {
     expect(m.start_url).toBe("/view");
     expect(m.scope).toBe("/view");
     expect(m.display).toBe("standalone");
-    expect(m.icons.length).toBeGreaterThan(0);
+    // A 192 is REQUIRED for Chrome on Android to offer installation at all.
+    // Without it the browser degrades to a home-screen shortcut that opens in a
+    // tab, silently -- which is exactly how this shipped the first time and how
+    // it was reported: "it just took me to the HTML page. thats not an app".
+    const sizes = new Set(m.icons.map((i: any) => i.sizes));
+    expect(sizes.has("192x192"), "Chrome Android needs a 192x192 icon").toBe(true);
+    expect(sizes.has("512x512")).toBe(true);
+    // At least one maskable, so Android can clip it to the launcher shape
+    // instead of framing it in a white rounded square.
+    expect(m.icons.some((i: any) => i.purpose === "maskable")).toBe(true);
     expect(JSON.stringify(m)).not.toContain(VIEW);
   });
 
-  it("serves a real PNG for the icon", async () => {
-    const res = await call("/view/icon.png", withCookie(VIEW));
-    expect(res.status).toBe(200);
-    expect(res.headers.get("content-type")).toBe("image/png");
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    expect(Array.from(bytes.slice(0, 8))).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  it("serves a real PNG at both declared sizes", async () => {
+    // Every size the manifest names must actually resolve. A manifest that
+    // promises a 192 and 404s it is worse than not declaring one: the install
+    // prompt still will not appear, and now the reason is invisible.
+    for (const [path, dim] of [["/view/icon.png", 512], ["/view/icon-192.png", 192]] as const) {
+      const res = await call(path, withCookie(VIEW));
+      expect(res.status, path).toBe(200);
+      expect(res.headers.get("content-type"), path).toBe("image/png");
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      expect(Array.from(bytes.slice(0, 8)), path)
+        .toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+      // IHDR width lives at bytes 16-19, big-endian: prove it is really the
+      // size claimed rather than the same image relabelled.
+      const w = new DataView(bytes.buffer).getUint32(16);
+      expect(w, path).toBe(dim);
+    }
   });
 
   it("404s assets without the cookie", async () => {

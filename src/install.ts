@@ -33,7 +33,7 @@
 // exactly the access the URL had. Nothing is widened.
 
 import { pathTokenMatches } from "./shared/mcp-core";
-import { ICON_PNG_BASE64 } from "./icon-data";
+import { ICON_192_BASE64, ICON_512_BASE64 } from "./icon-data";
 
 // Short and meaningless on purpose: a cookie named "view_token" tells anyone
 // glancing at devtools what it is worth stealing.
@@ -122,24 +122,38 @@ export function manifestJson(): string {
     orientation: "portrait",
     background_color: "#0b0e13",
     theme_color: "#0b0e13",
+    // The 192 is REQUIRED, not a nicety. Chrome on Android will not offer to
+    // install a web app without one: with only a 512 declared it silently
+    // downgrades to a plain home-screen shortcut that opens in a browser tab
+    // with the address bar showing, and reports no error anywhere. The app
+    // simply appears not to be installable.
+    //
+    // "maskable" tells Android it may clip the icon to the launcher's own shape
+    // (circle, squircle, rounded square). The artwork paints its corners in the
+    // background colour rather than leaving them transparent, so clipping takes
+    // nothing meaningful off.
     icons: [
+      { src: "/view/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+      { src: "/view/icon-192.png", sizes: "192x192", type: "image/png", purpose: "maskable" },
       { src: "/view/icon.png", sizes: "512x512", type: "image/png", purpose: "any" },
       { src: "/view/icon.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
     ],
   });
 }
 
-let iconBytes: Uint8Array | null = null;
+const iconCache = new Map<string, Uint8Array>();
 
-/** The home-screen icon. Decoded once per isolate, then reused. */
-export function iconResponse(): Response {
-  if (!iconBytes) {
-    const bin = atob(ICON_PNG_BASE64);
-    const bytes = new Uint8Array(bin.length);
+/** The home-screen icon at the requested size. Decoded once per isolate. */
+export function iconResponse(size: 192 | 512 = 512): Response {
+  const key = String(size);
+  let bytes = iconCache.get(key);
+  if (!bytes) {
+    const bin = atob(size === 192 ? ICON_192_BASE64 : ICON_512_BASE64);
+    bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    iconBytes = bytes;
+    iconCache.set(key, bytes);
   }
-  return new Response(iconBytes, {
+  return new Response(bytes, {
     headers: {
       "content-type": "image/png",
       // The icon carries no data, but it sits behind the same credential as the

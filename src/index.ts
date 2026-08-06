@@ -66,6 +66,7 @@ export default {
     // the one bug class a service worker cannot recover from on its own.
     if (
       url.pathname === "/view/icon.png" ||
+      url.pathname === "/view/icon-192.png" ||
       url.pathname === "/view/manifest.webmanifest" ||
       url.pathname === "/view/sw.js" ||
       url.pathname === "/view/app.js"
@@ -79,7 +80,8 @@ export default {
       if (request.method !== "GET" && request.method !== "HEAD") {
         return new Response("Method Not Allowed", { status: 405, headers: { allow: "GET, HEAD" } });
       }
-      if (url.pathname === "/view/icon.png") return iconResponse();
+      if (url.pathname === "/view/icon.png") return iconResponse(512);
+      if (url.pathname === "/view/icon-192.png") return iconResponse(192);
       if (url.pathname === "/view/sw.js" || url.pathname === "/view/app.js") {
         const body = url.pathname === "/view/sw.js" ? serviceWorkerJs() : appJs();
         return new Response(body, {

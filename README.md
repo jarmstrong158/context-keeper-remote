@@ -171,7 +171,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "/full/path/to/context-keepe
 One run generates the token, installs it, waits for the route to answer `200`,
 copies the URL, opens it in your browser, and prints a **QR code**.
 
-**2. Scan the QR with your phone**, then **Add to Home Screen**. Done.
+**2. Scan the QR with your phone**, then install it:
+
+- **Android / Chrome** — a banner offers **Install**, or use ⋮ → **Install app**.
+  If the menu only says *Add to Home screen*, the manifest is failing Chrome's
+  install criteria; the usual cause is a missing **192x192** icon, which makes
+  Chrome degrade silently to a plain shortcut that opens in a browser tab.
+- **iPhone** — must be **Safari** (Chrome on iOS cannot install web apps).
+  Share → **Add to Home Screen**.
+
+Then tap through Recent, Projects, Knowledge and Health once while you have
+signal — the offline cache only fills for pages you have actually opened.
 
 Add `-DryRun` to run everything except the install, which is the fastest way to
 check your setup before touching anything.
