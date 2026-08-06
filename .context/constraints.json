@@ -279,5 +279,40 @@
     "updated_at": "2026-08-06T14:15:32.264579+00:00",
     "verified_at": "2026-08-06T14:15:32.264579+00:00",
     "verified_sha": "570b1041a7af35eca09f1e5129f9583ff74d6a18"
+  },
+  {
+    "id": "con-009-2f52",
+    "rule": "Never emit or run a bare `wrangler deploy` for a repo that declares named environments. Always pass --env explicitly. Any tool that generates a deploy command must refuse to proceed when environments exist and none was named.",
+    "reason": "A bare deploy targets the TOP-LEVEL config, and in these repos the top level is the self-host profile: it omits database_id on purpose so Cloudflare auto-provisions a fresh D1 for each one-click deployer. Running it against the maintainer's Worker therefore rebinds a live, populated Worker to a brand-new EMPTY database. Nothing errors, nothing warns, and the deploy reports success -- the data is still in the old database but the Worker no longer points at it, so the failure presents as total data loss. The blast radius is maximal and the signal is zero, which is why the generating tool has to fail closed rather than warn.",
+    "triggering_incident": "install-deploy-hook.ps1 was written for cambium-remote, which has no named environments, so it emitted a bare `wrangler deploy`. It was then pointed at context-keeper-remote to \"also cover this repo\" -- which does keep its real deployment under [env.production]. The hook installed cleanly and would have bound the live Worker to an empty D1 on the next push, with 34 projects and 301 decisions in the real database. It was removed before any push and the instance verified intact, but nothing in the tooling would have stopped it; the installer now refuses when environments exist and -Env was not given, and refuses an -Env that does not appear in wrangler.toml.",
+    "enforced_by": "scripts/install-deploy-hook.ps1 -- run it against a repo with [env.*] and no -Env; it must write no hook and must name the environments it found",
+    "scope": "scripts/install-deploy-hook.ps1",
+    "hardness": "absolute",
+    "related_to": [
+      "con-008-a0aa",
+      "dec-006-1114"
+    ],
+    "tags": [
+      "wrangler",
+      "deploy",
+      "d1",
+      "data-loss",
+      "git-hooks",
+      "fail-closed"
+    ],
+    "retrieval_hints": [
+      "bare wrangler deploy wiped the database",
+      "worker pointing at an empty D1 after deploy",
+      "why pass --env to wrangler deploy",
+      "deploy succeeded but all the data is gone",
+      "top-level vs named environment deploy"
+    ],
+    "origin": "agent",
+    "schema_version": 4,
+    "status": "active",
+    "created_at": "2026-08-06T14:49:39.249680+00:00",
+    "updated_at": "2026-08-06T14:49:39.249680+00:00",
+    "verified_at": "2026-08-06T14:49:39.249680+00:00",
+    "verified_sha": "0bbbfb2d0095958179b1d2bbded3f167fa86b409"
   }
 ]
