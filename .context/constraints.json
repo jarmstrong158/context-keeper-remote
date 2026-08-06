@@ -136,5 +136,39 @@
     "updated_at": "2026-08-06T11:11:10.749723+00:00",
     "verified_at": "2026-08-06T11:11:10.712511+00:00",
     "verified_sha": "7920f76f8da4dafceb772779edf9df9b1327af77"
+  },
+  {
+    "id": "con-005-d300",
+    "rule": "Never confirm a deploy with `gh run list --limit 1`. Filter by workflow (`--workflow=deploy.yml`) and check that the run's headSha matches the commit you expect. A repo with CI and Deploy workflows returns whichever finished last, which is usually CI.",
+    "reason": "The unfiltered list is ordered by recency across ALL workflows. CI is faster than Deploy, so it almost always finishes first and appears at the top. Reading that as the deploy result reports success while the deploy is still running or has already failed. The failure is silent and durable: the code is merged, main looks correct, tests pass, and every later diagnosis proceeds on the false premise that the running Worker matches the source. Confirming the headSha as well catches the second version of the same mistake, where the right workflow succeeded but for an earlier commit.",
+    "triggering_incident": "cambium-remote's /status route was merged, tested, and reported as deployed on the strength of `gh run list --limit 1` returning completed/success. That was the CI run. The Deploy run had failed on the same commit because CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are empty in that repo's GitHub secrets, so the route was never live. The user then ran the setup script, which installed STATUS_TOKEN on cambium-remote, polled the route, got 404 six times, and correctly refused to wire the consumer -- leaving an orphaned token and a wasted round trip. External probing could not have caught it either: the route 404s a wrong token before checking the method, so an absent route and a present one are indistinguishable from outside by design.",
+    "enforced_by": "gh run list --workflow=deploy.yml --json headSha,conclusion -- compare headSha against git rev-parse HEAD",
+    "scope": "global",
+    "hardness": "absolute",
+    "related_to": [
+      "dec-004-8f6b"
+    ],
+    "tags": [
+      "deploy",
+      "ci",
+      "verification",
+      "gotcha",
+      "cloudflare",
+      "github-actions"
+    ],
+    "retrieval_hints": [
+      "deploy said success but the code is not live",
+      "how do I check a worker actually deployed",
+      "gh run list returned the wrong workflow",
+      "route 404s after merging",
+      "CLOUDFLARE_API_TOKEN empty in actions"
+    ],
+    "origin": "agent",
+    "schema_version": 4,
+    "status": "active",
+    "created_at": "2026-08-06T12:40:56.168145+00:00",
+    "updated_at": "2026-08-06T12:40:56.168145+00:00",
+    "verified_at": "2026-08-06T12:40:56.168145+00:00",
+    "verified_sha": "d9e1389281e625aab69364b8f2577cf7eda63628"
   }
 ]
