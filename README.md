@@ -135,12 +135,26 @@ unavailable rather than erroring or hanging.
 
 ### Setting `VIEW_TOKEN`
 
-**Double-click `scripts/set-view-token.cmd`** in a clone of this repo. That is the
-whole procedure. On macOS/Linux run `scripts/set-view-token.sh`; from a terminal on
-Windows:
+From a clone of this repo:
 
 ```bash
-powershell -ExecutionPolicy Bypass -File scripts/set-view-token.ps1
+npm run set-view-token
+```
+
+That is the whole procedure. Use the npm script rather than naming the file
+directly — `scripts\set-view-token.cmd` is a Windows path, and in bash (Git Bash,
+WSL, the shell behind most "run this" buttons) the backslash is an **escape
+character**, so it silently collapses to `scriptsset-view-token.cmd: command not
+found`. The npm script has no path separator in it and works from either shell.
+
+Double-clicking `scripts/set-view-token.cmd` in Explorer works too. On macOS/Linux,
+`scripts/set-view-token.sh`.
+
+Add `-- -DryRun` to run everything except the install, which is the fastest way to
+confirm your environment is set up before touching anything:
+
+```bash
+npm run set-view-token -- -DryRun
 ```
 
 One run generates the token, installs it, waits for the route to answer `200`, puts
