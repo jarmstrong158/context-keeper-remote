@@ -112,6 +112,130 @@ Incoming ids are preserved; existing ids are reported, never overwritten.
 
 ---
 
+## The phone view (optional)
+
+`GET /view/<VIEW_TOKEN>` serves a read-only, server-rendered page: every project,
+its active decisions and constraints, and — if `CAMBIUM_STATUS_URL` is set — the
+team/org knowledge counts from cambium-remote. It is built for glancing at on a
+phone, and it is the answer to "what did we decide?" when you are not at a machine.
+
+Two properties are deliberate, and both are enforced in code:
+
+- **Its own credential.** The view runs on `VIEW_TOKEN`, never `AUTH_TOKEN`. Each
+  route refuses the other's token, so handing someone a view URL does not hand them
+  write access, and it can be rotated without touching any MCP connector.
+- **Unset means gone.** With no `VIEW_TOKEN`, `/view/<anything>` returns a bare
+  `404` — indistinguishable from a route that was never deployed. The feature is
+  opt-in by having a credential at all, so an unconfigured deploy has no extra
+  attack surface.
+
+`CAMBIUM_STATUS_URL` is optional and fails soft: if cambium-remote is slow (2.5s
+budget), down, or unset, the page still renders and says the knowledge counts are
+unavailable rather than erroring or hanging.
+
+### Setting `VIEW_TOKEN`
+
+**From inside a clone of this repo:**
+
+```bash
+npm run set-view-token
+```
+
+**From anywhere at all** — the script relocates itself, so cwd doesn't matter:
+
+```bash
+powershell -NoProfile -ExecutionPolicy Bypass -File "/full/path/to/context-keeper-remote/scripts/set-view-token.ps1"
+```
+
+Two things about how that command is written, both of which cost real debugging
+time here:
+
+- **Forward slashes, even on Windows.** In bash — Git Bash, WSL, the shell behind
+  most "run this" buttons — a backslash is an **escape character**, so
+  `scripts\set-view-token.cmd` silently collapses to
+  `scriptsset-view-token.cmd: command not found`. It names a file nobody wrote, so
+  it reads as a broken script rather than a mangled path.
+- **`npm run` needs the repo as its working directory.** Run it from one directory
+  up and you get `npm error enoent Could not read package.json` wrapped in a
+  PowerShell `NativeCommandError` whose first line is `At line:1 char:1` — which
+  says nothing about directories and looks like the script crashed. It never ran.
+  The absolute-path form above has no such requirement.
+
+Double-clicking `scripts/set-view-token.cmd` in Explorer works too. On macOS/Linux,
+`scripts/set-view-token.sh`.
+
+Add `-- -DryRun` to run everything except the install, which is the fastest way to
+confirm your environment is set up before touching anything:
+
+```bash
+npm run set-view-token -- -DryRun
+```
+
+One run generates the token, installs it, waits for the route to answer `200`, puts
+the URL on your clipboard, and opens it in your browser. On a fresh setup it asks
+nothing. The only prompt it will ever show is a confirmation when a `VIEW_TOKEN`
+already exists, since replacing one breaks every URL already in use — and `-Yes`
+(`CK_YES=1` for the shell version) skips even that.
+
+It opens the browser on purpose, not as a flourish: once the URL is in history you
+can bookmark it or push it to your phone through browser sync, so a lost clipboard
+isn't a lost URL.
+
+**What it refuses to do, and why.** The token is generated in-process and written to
+`wrangler secret put` over **stdin**, then displayed only as `abcd............wxyz`.
+Each of those matters, because a separate read-only credential is pointless if
+installing it leaks it:
+
+- Passing a secret as an **argument** puts it in shell history *and in the process
+  list*, readable by any other user on the machine for the duration of the call.
+- **Echoing** it into a pipe puts it in shell history.
+- **Printing** it puts it in terminal scrollback, in any screen-share or screenshot,
+  and in the transcript of any coding agent that ran the command — not hypothetical
+  here; see the audit numbers in the next section.
+
+So the token lands in exactly two places: Cloudflare, and your clipboard.
+**Put it in your password manager.** Cloudflare stores secrets write-only — there is
+no reading one back, only replacing it.
+
+Verification probes the route for a `200` rather than printing the value back, which
+is why a `404` afterwards is reported as *"redeploy the Worker"* instead of as a bad
+token: the script can prove the secret works without ever seeing it work.
+
+**Self-hosters: set your URL once.** No wrangler command reports the `workers.dev`
+host — not `whoami`, `deployments list`, `versions list`, or `deployments status` —
+so it lives in `package.json`:
+
+```bash
+node -e "const p=require('./package.json');p.contextKeeper.workerUrl='https://<worker>.<account>.workers.dev';require('fs').writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
+```
+
+The script reads it **before** installing anything, and refuses to run without it.
+That ordering is deliberate: a token installed without a URL to put it in is
+unrecoverable, since Cloudflare can't read a secret back. Failing before the write
+costs nothing; failing after costs the token.
+
+### Editing the script
+
+It targets **Windows PowerShell 5.1** — the version that ships with Windows and the
+one `.cmd` launches. Three things there are load-bearing and look like they could be
+modernized:
+
+- `RNGCryptoServiceProvider`, not `RandomNumberGenerator::Fill` — the latter doesn't
+  exist on .NET Framework and throws.
+- Manual `WebException` status extraction, not `-SkipHttpErrorCheck` — that parameter
+  is PowerShell 7 only.
+- Every wrangler call goes through `Invoke-Wrangler`. On 5.1, `2>&1` on a *native*
+  command wraps each stderr line in an ErrorRecord, and under
+  `$ErrorActionPreference = 'Stop'` the first one is **terminating** — so an ordinary
+  wrangler notice kills the run. The helper drops to `Continue` for the call and
+  restores it after, which is what turns stderr back into data.
+
+Prefer to do it by hand? `npx wrangler secret put VIEW_TOKEN --env production` prompts
+without echoing; you just generate the value yourself (`openssl rand -base64 32`) and
+mind where it lands.
+
+---
+
 ## ⚠️ Security: the connector URL is a credential
 
 The URL you paste into Claude **embeds `AUTH_TOKEN`** as its last path segment.
@@ -125,6 +249,12 @@ store. Treat it exactly like a password:
   **immediately invalidates every old URL** — any connector using the previous
   token starts getting `404`s until you update it in claude.ai (Step 3) with the new
   value.
+
+Everything in this section applies to the **view URL** too, with one difference in
+your favour: `VIEW_TOKEN` can only read. A leaked view URL exposes every decision
+summary in every project on the instance, which may well be the more sensitive half
+— but it cannot write, deprecate, or delete anything. That is the entire reason the
+two are separate credentials rather than one.
 
 ### Why the token is in the URL path, and what that costs you
 

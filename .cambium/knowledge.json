@@ -1,0 +1,146 @@
+{
+  "items": [
+    {
+      "id": "k-2bc9228c",
+      "type": "memory",
+      "kind": "decision",
+      "content": "Extract a shared src/shared/mcp-core.ts, byte-identical across context-keeper-remote / agentsync-remote / cambium-remote, guarded by a sha-256 drift test that all three repos pin to the same constant. A published package is the intended end state but deliberately deferred.",
+      "why": "True sharing across three SEPARATE GitHub repos requires either a monorepo, a published npm package, or a git subtree \u2014 each of which needs an npm scope, a release workflow, and a coordinated version bump across three independent Cloudflare deploy pipelines. Doing that in the same pass as a batch of security fixes would have coupled an urgent, reviewable change to a risky infrastructure migration. Instead the code was collapsed into ONE import-free file (no imports, so it drops into any repo regardless of their differing extensionless-vs-.js module resolution) that is copied byte-identically, plus a test in each repo that hashes the file's LF-normalized bytes and compares against a constant pinned to the SAME value in all three. Editing the shared file in one repo turns that repo's suite red until the constant is updated, and updating the constant in only one repo makes the divergence visible in review. That converts drift from silent to loud, which was the actual failure mode, and it is reversible in one step once the package exists.  Problem: Three remote MCP Workers each carried their own copy of the JSON-RPC envelope, the MCP handshake semantics, and a safeEqual token comparison. All three safeEqual copies carried the identical comment \"kept in sync with the sibling Worker\" and all three had nonetheless drifted to different behaviour within six weeks of first shipping: context-keeper-remote percent-decoded the path segment before comparing and the other two did not, and two of the three echoed the client's requested protocolVersion verbatim instead of validating it. A fourth Worker was foreseeable, so the copies had to be collapsed before the drift compounded further.",
+      "tags": [
+        "mcp",
+        "workers",
+        "shared-code",
+        "drift",
+        "architecture",
+        "xylem",
+        "context-keeper"
+      ],
+      "scope": "local",
+      "project": "context-keeper-remote",
+      "source": {
+        "system": "context-keeper",
+        "ref": "dec-001-b0d4"
+      },
+      "created_by": "jonny-desktop",
+      "created_at": "2026-08-06T03:37:19.525072+00:00",
+      "updated_at": "2026-08-06T03:37:19.525072+00:00",
+      "status": "active",
+      "trust": {
+        "recalls": 0,
+        "endorsements": [],
+        "projects": [
+          "context-keeper-remote"
+        ]
+      }
+    },
+    {
+      "id": "k-440c11d2",
+      "type": "memory",
+      "kind": "decision",
+      "content": "The remote Worker serves a read-only phone view at GET /view/<VIEW_TOKEN> -- server-rendered HTML, glance-shaped, on a SEPARATE credential from the MCP connector token -- and enriches it with cambium-remote's team/org knowledge counts via an optional CAMBIUM_STATUS_URL, fail-soft. VIEW_TOKEN unset means the route 404s, and each route refuses the other's token.",
+      "why": "A second, lower-value credential is the whole design. VIEW_TOKEN sits on a GET-only route that issues nothing but SELECTs, so a leaked glance-URL discloses decision summaries rather than write access to 34 projects. The separation is enforced in BOTH directions and tested as such -- /view rejects AUTH_TOKEN and /mcp rejects VIEW_TOKEN -- because a second credential that silently accepts the first is not a second credential. An unset VIEW_TOKEN 404s exactly like any unknown path, so the feature is off until deliberately enabled. Server-rendered rather than a client fetching JSON: the token never reaches JavaScript, there is no CORS surface, and the page works with scripting disabled. One document with inline CSS and zero external references -- on mobile data that is the difference between glanceable and not. Two D1 queries total rather than a fan-out per project. Entry text is arbitrary recorded prose being injected into HTML, so it is escaped and a test proves an <img onerror> summary renders inert. The cambium knowledge panel crosses a NETWORK boundary to a second Worker, so it is treated as an enrichment and never a dependency: bounded at 2.5s, kicked off before the D1 queries so the round trip overlaps rather than adds, and every failure mode (unset secret, timeout, non-200, unexpected shape) degrades to a stated absence rather than a blank space or a hung page. It sends an explicit User-Agent because context-keeper's con-007 records Cloudflare bot rules 403-ing a default client UA -- here that would present as a silently empty panel rather than an error. It shows team and org only: local scope is desktop-only by design AND is the staging area rather than the part that gets read (136 promoted items carry 774 recalls; 229 local ones carry 117), so the page states the absence instead of implying the counts are everything. cambium-remote's status performs no writes and its recall deliberately does not increment recall counters, so glancing from a phone cannot perturb the promotion signals the desktop side reasons about.  Problem: The decision logs were only reachable from a desktop MCP client, and glancing at them on a phone had no path. The data was already remote (D1 holds 34 projects / 414 entries via the mirror), so the gap was presentation, not plumbing. But the obvious implementation -- reuse the connector URL -- is dangerous in a specific way this repo has already measured: AUTH_TOKEN is embedded in the URL and is read/write over every project, and the security section documents connector URLs appearing in ~54 places across 13 local transcripts on ONE machine. A dashboard URL is opened on a phone, where it lands in browser history, tab sync and screenshots, so reusing that token would place a full-write credential exactly where it leaks most, and rotating it to recover would break every claude.ai connector simultaneously.",
+      "tags": [
+        "mobile",
+        "view",
+        "auth",
+        "worker",
+        "read-only",
+        "context-keeper"
+      ],
+      "scope": "local",
+      "project": "context-keeper-remote",
+      "source": {
+        "system": "context-keeper",
+        "ref": "dec-002-ca5b"
+      },
+      "created_by": "jonny-desktop",
+      "created_at": "2026-08-06T03:37:19.525072+00:00",
+      "updated_at": "2026-08-06T03:37:19.525072+00:00",
+      "status": "active",
+      "trust": {
+        "recalls": 0,
+        "endorsements": [],
+        "projects": [
+          "context-keeper-remote"
+        ]
+      }
+    },
+    {
+      "id": "k-3ca036e2",
+      "type": "memory",
+      "kind": "constraint",
+      "content": "Never set a Worker secret by passing its value as a command argument, by echoing it into a pipe, or by printing it for a human to copy. Generate it in-process, write it to wrangler's STDIN, hand it off via the clipboard, and display only a masked form. Verify by probing the route for a 200, never by rendering the value back. Two exceptions, both required to be commented where they occur: handing the URL to a browser (no stdin path exists, and the browser holds it in argv and history regardless -- must be opt-out), and a mode-600 file when no clipboard exists (access-controlled, unlike scrollback).",
+      "why": "All three obvious ways to set a secret defeat the reason for having a separate credential. A value passed as argv is visible in the process list to every other user on the machine for the lifetime of the call, and lands in shell history. An echoed value lands in shell history too. A printed value lands in terminal scrollback, in any screen-share or screenshot, and in the transcript of any coding agent that ran the command. That last route is measured, not theoretical: this project's own README documents connector URLs found in ~54 occurrences across 13 local session transcripts on a single machine, none pasted deliberately. VIEW_TOKEN exists precisely so a read-only viewer is not also a write credential; leaking it during setup gives back the separation the design bought. The exceptions are narrow on purpose: each was reached only after confirming no stdin-shaped alternative exists, and each is strictly less exposed than the scrollback it replaces.",
+      "tags": [
+        "security",
+        "secrets",
+        "wrangler",
+        "view-token",
+        "setup",
+        "tooling",
+        "context-keeper"
+      ],
+      "scope": "local",
+      "project": "context-keeper-remote",
+      "source": {
+        "system": "context-keeper",
+        "ref": "con-001-7fb5"
+      },
+      "created_by": "jonny-desktop",
+      "created_at": "2026-08-06T03:37:19.525072+00:00",
+      "updated_at": "2026-08-06T03:37:19.525072+00:00",
+      "status": "active",
+      "trust": {
+        "recalls": 0,
+        "endorsements": [],
+        "projects": [
+          "context-keeper-remote"
+        ]
+      }
+    },
+    {
+      "id": "k-9a5249ef",
+      "type": "memory",
+      "kind": "constraint",
+      "content": "In Windows PowerShell 5.1, never use 2>&1 on a native command while $ErrorActionPreference is 'Stop'. Route native calls through a helper that drops the preference to 'Continue' for the duration of the call and restores it in a finally block.",
+      "why": "5.1 does not merely merge streams for a native command: it wraps each stderr line in an ErrorRecord, and under 'Stop' the first record is a terminating error. The exit code is irrelevant -- a process that returns 0 still kills the script if it wrote a single line to stderr. Tools that print progress, banners, or update notices to stderr are therefore fatal to any script that redirects them, and the failure is deeply misleading: the error text shown is the tool's own benign warning, so it reads as the tool having failed rather than as a redirection bug in the caller.",
+      "tags": [
+        "powershell",
+        "windows",
+        "scripts",
+        "stderr",
+        "gotcha",
+        "tooling",
+        "context-keeper"
+      ],
+      "scope": "local",
+      "project": "context-keeper-remote",
+      "source": {
+        "system": "context-keeper",
+        "ref": "con-002-b4cc"
+      },
+      "created_by": "jonny-desktop",
+      "created_at": "2026-08-06T03:37:19.525072+00:00",
+      "updated_at": "2026-08-06T03:37:19.525072+00:00",
+      "status": "active",
+      "trust": {
+        "recalls": 0,
+        "endorsements": [],
+        "projects": [
+          "context-keeper-remote"
+        ]
+      }
+    }
+  ],
+  "imported": {
+    "context_keeper": [
+      "dec-001-b0d4",
+      "dec-002-ca5b",
+      "con-001-7fb5",
+      "con-002-b4cc"
+    ],
+    "agentsync": [],
+    "agentsync_last": {},
+    "import": []
+  }
+}

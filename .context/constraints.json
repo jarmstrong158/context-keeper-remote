@@ -1,0 +1,105 @@
+[
+  {
+    "id": "con-001-7fb5",
+    "rule": "Never set a Worker secret by passing its value as a command argument, by echoing it into a pipe, or by printing it for a human to copy. Generate it in-process, write it to wrangler's STDIN, hand it off via the clipboard, and display only a masked form. Verify by probing the route for a 200, never by rendering the value back. Two exceptions, both required to be commented where they occur: handing the URL to a browser (no stdin path exists, and the browser holds it in argv and history regardless -- must be opt-out), and a mode-600 file when no clipboard exists (access-controlled, unlike scrollback).",
+    "reason": "All three obvious ways to set a secret defeat the reason for having a separate credential. A value passed as argv is visible in the process list to every other user on the machine for the lifetime of the call, and lands in shell history. An echoed value lands in shell history too. A printed value lands in terminal scrollback, in any screen-share or screenshot, and in the transcript of any coding agent that ran the command. That last route is measured, not theoretical: this project's own README documents connector URLs found in ~54 occurrences across 13 local session transcripts on a single machine, none pasted deliberately. VIEW_TOKEN exists precisely so a read-only viewer is not also a write credential; leaking it during setup gives back the separation the design bought. The exceptions are narrow on purpose: each was reached only after confirming no stdin-shaped alternative exists, and each is strictly less exposed than the scrollback it replaces.",
+    "triggering_incident": "PR #7 shipped the /view route but left setting VIEW_TOKEN as a manual step. The first instinct was to generate the token in the assistant's session and run wrangler directly, which would have written the value into the session transcript -- the exact leak channel the README already quantifies. scripts/set-view-token.ps1 moved generation onto the operator's machine at run time, so no participant in the conversation ever observes the value, and the script still cannot be run by an agent without reintroducing the leak.",
+    "enforced_by": "scripts/set-view-token.ps1 and scripts/set-view-token.sh -- audit every line mentioning the token or full URL; the only permitted sinks are the wrangler stdin pipe, mask derivation, clipboard, the browser handoff, and the mode-600 fallback file",
+    "scope": "scripts/",
+    "hardness": "absolute",
+    "related_to": [
+      "dec-002-ca5b"
+    ],
+    "tags": [
+      "security",
+      "secrets",
+      "wrangler",
+      "view-token",
+      "setup",
+      "tooling"
+    ],
+    "retrieval_hints": [
+      "how do I set VIEW_TOKEN without leaking it",
+      "why does the setup script not print the token",
+      "secret ended up in shell history or the process list",
+      "can the agent set the Cloudflare secret for me",
+      "rotate the phone view URL"
+    ],
+    "origin": "agent",
+    "schema_version": 4,
+    "status": "active",
+    "created_at": "2026-08-06T03:14:30.269699+00:00",
+    "updated_at": "2026-08-06T03:22:18.617977+00:00",
+    "verified_at": "2026-08-06T03:22:18.581754+00:00",
+    "verified_sha": "62a363440abadfae5be7927f98c83c3462757b14"
+  },
+  {
+    "id": "con-002-b4cc",
+    "rule": "In Windows PowerShell 5.1, never use 2>&1 on a native command while $ErrorActionPreference is 'Stop'. Route native calls through a helper that drops the preference to 'Continue' for the duration of the call and restores it in a finally block.",
+    "reason": "5.1 does not merely merge streams for a native command: it wraps each stderr line in an ErrorRecord, and under 'Stop' the first record is a terminating error. The exit code is irrelevant -- a process that returns 0 still kills the script if it wrote a single line to stderr. Tools that print progress, banners, or update notices to stderr are therefore fatal to any script that redirects them, and the failure is deeply misleading: the error text shown is the tool's own benign warning, so it reads as the tool having failed rather than as a redirection bug in the caller.",
+    "triggering_incident": "set-view-token.ps1 died before wrangler ever ran. The terminating error was an npm notice -- \"the following package was not found and will be installed\" -- a warning, not a failure. Because the message named npm, the obvious reading was that npm had broken; the actual cause was 2>&1 in the caller. Reproduced deterministically, then fixed with an Invoke-Wrangler helper and re-verified against wrangler triggers deploy --dry-run, which does write WARNING to stderr and now survives.",
+    "enforced_by": "scripts/set-view-token.ps1::Invoke-Wrangler -- every wrangler invocation must go through it; a bare '& npx wrangler ... 2>&1' in that file is the violation",
+    "scope": "scripts/",
+    "hardness": "absolute",
+    "related_to": [
+      "con-001-7fb5"
+    ],
+    "tags": [
+      "powershell",
+      "windows",
+      "scripts",
+      "stderr",
+      "gotcha",
+      "tooling"
+    ],
+    "retrieval_hints": [
+      "script failed with an npm warning as the error",
+      "PowerShell threw on a command that exited 0",
+      "NativeCommandError from a native executable",
+      "2>&1 breaks my PowerShell script",
+      "wrangler warning killed the run"
+    ],
+    "origin": "agent",
+    "schema_version": 4,
+    "status": "active",
+    "created_at": "2026-08-06T03:30:48.457433+00:00",
+    "updated_at": "2026-08-06T03:30:55.271975+00:00",
+    "verified_at": "2026-08-06T03:30:55.233409+00:00",
+    "verified_sha": "22f7fd1eba3da7fe67446cd3a6cb60f3ab3ea1ef"
+  },
+  {
+    "id": "con-003-163b",
+    "rule": "A runnable command handed to someone must assume nothing about their shell or their working directory. Use forward slashes even on Windows, and either an absolute path or an explicit cd -- never a bare npm run, and never a backslash path.",
+    "reason": "Two failure modes, and both look like a broken program rather than a bad instruction. (1) Backslash is an escape character in bash -- Git Bash, WSL, and the shell behind most run-this buttons -- so scripts\\set-view-token.cmd collapses to scriptsset-view-token.cmd and reports command not found, naming a file nobody wrote. (2) npm run requires the repo as cwd; from one directory up it emits npm error enoent Could not read package.json, which PowerShell then wraps in a NativeCommandError whose first line is 'At line:1 char:1'. That header mentions no directory and no package.json, so it reads as the script having crashed. In both cases the program never executes, so there is no output and no log, and every diagnostic that assumes it ran is chasing nothing.",
+    "triggering_incident": "Four rounds were spent debugging set-view-token 'failing' -- adding a dry-run mode, a self-writing log, and a trap -- before anyone checked whether it was running. It never was. The user's shell sat in C:\\Users\\jarms\\repos while the agent's tools defaulted into the repo, so no reproduction attempt could ever hit it. The tell was the missing log file: the transcript starts near the top of the script, so its absence meant execution never began. The error was only found by redirecting output to a file and then searching the filesystem for where that file actually landed -- which is what revealed the cwd.",
+    "enforced_by": "npm run set-view-token in package.json scripts -- the documented entry point; verified from both bash and PowerShell",
+    "scope": "README.md",
+    "hardness": "absolute",
+    "related_to": [
+      "con-001-7fb5",
+      "con-002-b4cc"
+    ],
+    "tags": [
+      "docs",
+      "windows",
+      "bash",
+      "cross-shell",
+      "gotcha",
+      "onboarding"
+    ],
+    "retrieval_hints": [
+      "command not found but the file exists",
+      "backslash path does not work in git bash",
+      "script produced no output and no log",
+      "why did my windows command mangle itself",
+      "how should runnable commands be written in the readme"
+    ],
+    "origin": "agent",
+    "schema_version": 4,
+    "status": "active",
+    "created_at": "2026-08-06T04:00:19.070963+00:00",
+    "updated_at": "2026-08-06T04:05:45.150547+00:00",
+    "verified_at": "2026-08-06T04:05:45.118019+00:00",
+    "verified_sha": "f0ca2721284fd4cb3264daf89a19fa04adf83cce"
+  }
+]

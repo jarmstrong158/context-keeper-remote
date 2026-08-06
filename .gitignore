@@ -10,3 +10,19 @@ dist/
 # every read, and embeddings.json is a derived cache; neither belongs in git.
 .context/usage.json
 .context/embeddings.json
+
+# Mirror runtime state -- watermark and conflict log, regenerated on every
+# sync. Not memory; tracking them would make every mirrored session a commit.
+.context/.mirror_watermark
+.context/.mirror_conflicts.json
+
+# Written only by scripts/set-view-token.sh when no clipboard tool exists.
+# Contains the full view URL, which is a credential. Delete it once saved.
+.view-url
+
+# Run log from scripts/set-view-token.ps1. The token is scrubbed out before
+# the file is left on disk, but it still records your environment -- untracked.
+.view-setup.log
+
+# Capture file from the setup-script troubleshooting instructions.
+setup-output.txt
