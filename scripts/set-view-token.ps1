@@ -251,8 +251,20 @@ if ($secrets.Output -match '"name"\s*:\s*"VIEW_TOKEN"' -and -not $Yes) {
     Write-Host "  A VIEW_TOKEN already exists." -ForegroundColor Yellow
     Write-Host "  Replacing it breaks every view URL already in use, immediately."
     Write-Host "  AUTH_TOKEN is untouched, so MCP connectors keep working."
-    $go = Read-Host "  Replace it? [y/N]"
-    if ($go -notmatch '^[Yy]') { Write-Host "  cancelled.`n"; exit 0 }
+    # Fail CLOSED when there is nobody to ask. Read-Host returns $null at EOF --
+    # a piped, redirected, or scheduled run -- and `$null -notmatch '...'`
+    # evaluates to EMPTY in PowerShell, not $true. So the obvious
+    # `if ($go -notmatch '^[Yy]')` is falsy and execution falls straight through
+    # into the replace: a confirmation prompt that defaults to DESTROY whenever
+    # no human is present. Casting to [string] turns $null into "", which the
+    # regex then correctly fails to match.
+    if (-not [Environment]::UserInteractive) {
+        Write-Host ""
+        Fail "A VIEW_TOKEN already exists and this is a non-interactive run, so there is nobody to confirm with. Re-run with -Yes to replace it deliberately. Nothing was changed."
+    }
+    $go = ""
+    try { $go = [string](Read-Host "  Replace it? [y/N]") } catch { $go = "" }
+    if ($go -notmatch '^\s*[Yy]') { Write-Host "  cancelled.`n"; Stop-Log; exit 0 }
 }
 
 # --- 4. generate ----------------------------------------------------------
