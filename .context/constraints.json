@@ -101,5 +101,40 @@
     "updated_at": "2026-08-06T04:05:45.150547+00:00",
     "verified_at": "2026-08-06T04:05:45.118019+00:00",
     "verified_sha": "f0ca2721284fd4cb3264daf89a19fa04adf83cce"
+  },
+  {
+    "id": "con-004-69f4",
+    "rule": "Never test a PowerShell Read-Host result directly against -match or -notmatch. Cast to [string] first, and refuse the destructive path outright when [Environment]::UserInteractive is false. A confirmation must fail closed.",
+    "reason": "Read-Host returns $null at EOF, which is every piped, redirected, scheduled, or otherwise non-interactive run. In PowerShell $null -notmatch 'pattern' evaluates to EMPTY rather than $true, so the natural guard if ($answer -notmatch '^[Yy]') { cancel } is falsy on $null and execution falls straight through into the action it was meant to gate. The prompt therefore defaults to yes precisely when no human is present to have said it. Casting to [string] turns $null into the empty string, which the regex correctly fails to match; the UserInteractive check is the belt to that, so the destructive path is unreachable without an explicit flag.",
+    "triggering_incident": "set-view-token.ps1 guarded replacing VIEW_TOKEN behind a Replace it? [y/N] prompt. A captured non-interactive dry run printed the \"A VIEW_TOKEN already exists\" warning and then continued to the install step, with no prompt text and no \"cancelled\" anywhere in the output. Replacing VIEW_TOKEN drops every enrolled device at once and the previous value cannot be recovered, so this failed open onto the single most destructive action in the script. The bug was invisible interactively, because a human answering the prompt makes it behave correctly.",
+    "enforced_by": "scripts/set-view-token.ps1 -- run it with -DryRun through a pipe; it must print cancelled and must not reach the install step without -Yes",
+    "scope": "scripts/",
+    "hardness": "absolute",
+    "related_to": [
+      "con-002-b4cc",
+      "dec-003-0a24"
+    ],
+    "tags": [
+      "powershell",
+      "scripts",
+      "safety",
+      "fail-closed",
+      "gotcha",
+      "windows"
+    ],
+    "retrieval_hints": [
+      "confirmation prompt was skipped in a script",
+      "Read-Host returned null and the check passed",
+      "null -notmatch returns empty in PowerShell",
+      "script destroyed something without asking",
+      "prompt did not appear when piped"
+    ],
+    "origin": "agent",
+    "schema_version": 4,
+    "status": "active",
+    "created_at": "2026-08-06T04:34:31.464554+00:00",
+    "updated_at": "2026-08-06T04:34:37.265078+00:00",
+    "verified_at": "2026-08-06T04:34:37.197380+00:00",
+    "verified_sha": "c9716a88eef1fded7055d2a7579e4b519403ca98"
   }
 ]
