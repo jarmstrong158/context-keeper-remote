@@ -464,14 +464,17 @@ ul{list-style:none;margin:0;padding:0}
  background:var(--bg);padding:1px 5px;border-radius:4px;border:1px solid var(--line)}
 footer{padding:20px 16px 30px;color:var(--dim2);font-size:11.5px;line-height:1.6}
 
-/* --- rows became links; keep them looking like rows --- */
-.e a,.p a{color:inherit;text-decoration:none;display:block}
-.p a{display:flex;align-items:center;gap:10px;width:100%}
+/* --- entry rows became links; keep them looking like rows ---
+   The padding moves onto the <a> so the whole row is the tap target rather
+   than just the text. Scoped to .e ONLY: .p rows are the Knowledge counts,
+   which are not links. A matching .p{padding:0} rule shipped here briefly and
+   left those rows with no padding at all, clipped at both edges, because the
+   .p a that was supposed to restore it no longer exists -- the project list it
+   belonged to became a table. */
+.e a{color:inherit;text-decoration:none;display:block}
 .e{padding:0}
 .e a{padding:11px 16px}
-.p{padding:0}
-.p a{padding:11px 16px}
-.e a:active,.p a:active{background:var(--pan)}
+.e a:active{background:var(--pan)}
 .e.dead .t{color:var(--dim)}
 .dd{padding:1px 7px;border-radius:20px;border:1px solid var(--line);color:var(--dim2);
  font-size:10px;text-transform:uppercase;letter-spacing:.04em}
