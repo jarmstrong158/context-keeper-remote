@@ -470,9 +470,21 @@ describe("read-only view (/view/:token)", () => {
   it("states where knowledge lives when cambium is not wired", async () => {
     // Absence is stated, not implied. A page showing only decision logs while
     // looking complete is the failure being avoided.
-    const body = await (await getView()).text();
+    //
+    // Now on its own tab, matching the desktop dashboard's layout -- so this
+    // asks the Knowledge tab rather than the landing page.
+    const body = await (
+      await SELF.fetch(`https://w.example.com/view/${VIEW}?t=know`)
+    ).text();
     expect(body).toContain("CAMBIUM_STATUS_URL");
     expect(body).toContain("desktop-only");
+  });
+
+  it("offers the same four tabs the desktop dashboard has", async () => {
+    const body = await (await getView()).text();
+    for (const label of ["Recent", "Projects", "Knowledge", "Health"]) {
+      expect(body, label).toContain(`>${label}</a>`);
+    }
   });
 
   it("never leaks either token into the page", async () => {

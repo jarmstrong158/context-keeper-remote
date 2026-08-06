@@ -31,6 +31,7 @@ import { hydrate, type EntryRow } from "./db";
 import {
   ago, entryDetail, entryRow, loadEntry, loadProject, PAGE_SIZE, search,
 } from "./detail";
+import { healthReport, healthHtml, projectsHtml } from "./health";
 
 // How long the page will wait on cambium-remote before rendering without it.
 // A phone on mobile data must not hang because a SECOND service is slow: the
@@ -188,7 +189,7 @@ export async function renderView(
     );
   }
 
-  return renderHome(db, cambiumUrl);
+  return renderHome(db, cambiumUrl, params?.get("t") ?? "over");
 }
 
 function toggleAll(all: boolean, base: string): string {
@@ -199,7 +200,8 @@ function toggleAll(all: boolean, base: string): string {
 
 async function renderHome(
   db: D1Database,
-  cambiumUrl?: string,
+  cambiumUrl: string | undefined,
+  tab: string,
 ): Promise<string> {
   // One rollup query and one feed query. Two round-trips, not two per project:
   // this is rendered on a phone, on mobile data, and a fan-out per project
@@ -248,16 +250,6 @@ async function renderHome(
   // this store exists to hold and the thing the phone previously could not see.
   const feedHtml = entries.map((e) => entryRow(e)).join("");
 
-  const projHtml = projects
-    .map(
-      (p) => `<li class="p"><a href="/view?p=${encodeURIComponent(p.project)}">
-      <span class="pn">${esc(p.project)}</span>
-      <span class="pc">${p.decisions}<i>d</i> ${p.constraints}<i>c</i>${
-        Number(p.pipelines) ? ` ${p.pipelines}<i>p</i>` : ""
-      }</span>
-      <span class="ts">${esc(ago(p.updated_at ?? ""))}</span></a></li>`,
-    )
-    .join("");
 
   const knowledgeHtml = !knowledge
     ? `<h2>Knowledge</h2><div class="note"><b>Not connected.</b> cambium's distilled
@@ -281,26 +273,41 @@ async function renderHome(
          staging area, not the part that gets read. Promoted knowledge is what
          recall actually returns.</div>`;
 
-  return shell(
-    `<h2>Recent</h2>
-  <ul>${feedHtml || '<li class="e"><div class="t">Nothing recorded yet.</div></li>'}</ul>
+  // One tab renders at a time. The desktop dashboard hides the others with
+  // JavaScript; here the tab is in the URL instead, so each one is a real page
+  // that can be bookmarked, and Health does not pay for a full-table scan on
+  // every visit to Recent.
+  let main: string;
+  if (tab === "proj") {
+    main = projectsHtml(await healthReport(db));
+  } else if (tab === "know") {
+    main = knowledgeHtml;
+  } else if (tab === "health") {
+    main = healthHtml(await healthReport(db));
+  } else {
+    main = `<h2>Recent</h2>
+  <ul>${feedHtml || '<li class="e"><div class="t">Nothing recorded yet.</div></li>'}</ul>`;
+  }
 
-  <h2>Projects</h2>
-  <ul>${projHtml}</ul>
-
-  ${knowledgeHtml}`,
-    {
-      search: "",
-      header: `<h1>memory<span>${projects.length} projects</span></h1>
+  return shell(main, {
+    search: "",
+    tab,
+    header: `<h1>memory<span>${projects.length} projects</span></h1>
   <div class="tot">
     <span><b>${totals.dec}</b> decisions</span>
     <span><b>${totals.con}</b> constraints</span>
     ${totals.pipe ? `<span><b>${totals.pipe}</b> pipelines</span>` : ""}
     <span class="ts">${esc(ago(freshest))} ago</span>
   </div>`,
-    },
-  );
+  });
 }
+
+const TABS: Array<[string, string]> = [
+  ["over", "Recent"],
+  ["proj", "Projects"],
+  ["know", "Knowledge"],
+  ["health", "Health"],
+];
 
 /**
  * The document around every page.
@@ -313,11 +320,24 @@ async function renderHome(
  */
 function shell(
   main: string,
-  opts: { search?: string; header?: string } = {},
+  opts: { search?: string; header?: string; tab?: string } = {},
 ): string {
   const header =
     opts.header ??
     `<h1><a href="/view" class="home">memory</a></h1>`;
+
+  // Links, not buttons: the desktop dashboard swaps tabs with JavaScript, which
+  // it can afford because it is one self-contained file with all the data
+  // already in it. Here each tab is a real URL -- bookmarkable, shareable,
+  // survivable across an app restart, and reachable with no script at all.
+  const tabs = opts.tab
+    ? `<nav class="tabs">${TABS.map(
+        ([id, label]) =>
+          `<a class="tab${id === opts.tab ? " on" : ""}" href="/view${
+            id === "over" ? "" : `?t=${id}`
+          }">${label}</a>`,
+      ).join("")}</nav>`
+    : "";
 
   // GET, so a search is a plain URL that can be bookmarked, shared between
   // devices, and re-run by reloading. No JS involved.
@@ -446,12 +466,38 @@ h2 .cnt{color:var(--dim2);font-weight:400;margin-left:6px}
  font-size:11.5px;text-decoration:none;font-family:ui-monospace,Menlo,monospace}
 .idline{margin-top:22px;padding-top:12px;border-top:1px solid var(--line);
  color:var(--dim2);font-size:11px;font-family:ui-monospace,Menlo,monospace}
+.tabs{display:flex;gap:4px;margin-top:11px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.tab{padding:6px 12px;border-radius:7px;border:1px solid transparent;color:var(--dim);
+ font-size:13px;text-decoration:none;white-space:nowrap}
+.tab.on{background:var(--pan);border-color:var(--line);color:var(--ink)}
+
+/* --- health --- */
+.health{padding:4px 16px 0}
+.hrow{margin-bottom:16px}
+.hl{font-size:13px;font-weight:560}
+.trk{height:6px;border-radius:4px;background:var(--pan);border:1px solid var(--line);
+ margin:5px 0 4px;overflow:hidden}
+.fill{height:100%;border-radius:4px}
+.fill.bad{background:#f2545b}
+.fill.warn{background:var(--warn)}
+.hv{font-size:12px;color:var(--dim);font-variant-numeric:tabular-nums}
+.hv span{color:var(--dim2)}
+.hn{font-size:11.5px;color:var(--dim2);line-height:1.5;margin-top:3px}
+.tw{overflow-x:auto;padding:0 16px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;font-weight:600;color:var(--dim2);font-size:11px;text-transform:uppercase;
+ letter-spacing:.05em;padding:8px 6px;border-bottom:1px solid var(--line)}
+td{padding:9px 6px;border-bottom:1px solid var(--line)}
+td a{color:inherit;text-decoration:none;font-weight:560}
+.num{text-align:right;font-variant-numeric:tabular-nums;color:var(--dim)}
+.num.bad{color:#f2545b}
 .more{padding:14px 16px}
 .more a{color:var(--dim);font-size:12.5px}
 </style></head><body>
 <header>
   ${header}
   ${searchBox}
+  ${tabs}
 </header>
 <main>${main}</main>
 <footer>
