@@ -244,6 +244,24 @@ of the running Worker and nothing to show it.
 Main only, skips branch deletes, `git push --no-verify` skips it once, `-Remove`
 uninstalls.
 
+**It refuses to install without `-Env` in a repo that has named environments**,
+and that refusal is load-bearing rather than fussy. A bare `wrangler deploy` uses
+the *top-level* profile — which in this repo is the self-host profile, and that
+one deliberately omits `database_id` so Cloudflare provisions a **fresh empty
+database**. A hook installed without `-Env` here would bind the live Worker to an
+empty D1 on the next push. So:
+
+```bash
+# cambium-remote -- no named environments, bare deploy is correct
+scripts/install-deploy-hook.cmd
+
+# a repo whose real deploy lives under [env.production]
+scripts/install-deploy-hook.cmd -Env production
+```
+
+This repo does not need the hook at all — its GitHub Actions deploy works, and a
+hook would deploy twice per push.
+
 **Why not just fix the CI?** Because that step genuinely cannot be automated.
 GitHub Actions needs `CLOUDFLARE_API_TOKEN`, and minting a Cloudflare API token
 through the API requires an existing token carrying *User API Tokens: Edit*.

@@ -43,6 +43,11 @@
 [CmdletBinding()]
 param(
     [string]$RepoDir = "",
+    # The wrangler environment the hook should deploy. Left empty it emits a
+    # bare `wrangler deploy`, which is correct ONLY for a repo with no named
+    # environments. See the guard below -- getting this wrong is the most
+    # damaging thing this script could do.
+    [string]$Env = "",
     [switch]$Remove
 )
 
@@ -81,6 +86,40 @@ if ($hooksPath -and $hooksPath -notmatch '^fatal|error') {
 if (-not (Test-Path $hookDir)) { New-Item -ItemType Directory -Path $hookDir -Force | Out-Null }
 $hookFile = Join-Path $hookDir "pre-push"
 
+# --- refuse to emit a deploy that would target the wrong profile ----------
+# A bare `wrangler deploy` uses the TOP-LEVEL config. In a repo that keeps its
+# real deployment under a named environment, the top level is usually the
+# self-host profile -- and in context-keeper-remote's case that profile declares
+# a D1 binding with NO database_id, so Cloudflare AUTO-PROVISIONS a fresh empty
+# database and binds the live Worker to it. A hook installed without -Env there
+# would silently replace a populated production database with an empty one on
+# the next push.
+#
+# That is not hypothetical: this script was pointed at context-keeper-remote
+# during development and would have done exactly that. So the check is not a
+# warning, it is a refusal.
+$envNames = @()
+$wrangler = Join-Path $RepoDir "wrangler.toml"
+if (Test-Path $wrangler) {
+    $envNames = @(Select-String -Path $wrangler -Pattern '^\s*\[env\.([A-Za-z0-9_-]+)' |
+                  ForEach-Object { $_.Matches.Groups[1].Value } | Sort-Object -Unique)
+}
+if ($envNames.Count -gt 0 -and -not $Env) {
+    Write-Host ""
+    Say "$RepoDir defines named wrangler environments: $($envNames -join ', ')"
+    Say "A bare 'wrangler deploy' would deploy the TOP-LEVEL profile instead,"
+    Say "which in these repos is the self-host profile -- and that one leaves"
+    Say "database_id unset so Cloudflare provisions a NEW EMPTY database and"
+    Say "binds the live Worker to it."
+    Write-Host ""
+    Fail "Refusing to install a hook that would deploy the wrong profile. Re-run with -Env <name>, e.g. -Env $($envNames[0])."
+}
+if ($Env -and $envNames -notcontains $Env) {
+    Fail "$RepoDir has no [env.$Env] section. Found: $(if($envNames){$envNames -join ', '}else{'none'})."
+}
+$deployCmd = if ($Env) { "npx wrangler deploy --env $Env" } else { "npx wrangler deploy" }
+Say "deploy : $deployCmd"
+
 if ($Remove) {
     if (Test-Path $hookFile) {
         Remove-Item $hookFile -Force
@@ -96,7 +135,7 @@ if ((Test-Path $hookFile) -and -not ((Get-Content $hookFile -Raw) -match "contex
 
 # LF endings and no BOM: git runs hooks through sh, and a CRLF shebang line
 # fails as "bad interpreter" while naming a file that plainly exists.
-$hook = @'
+$hookTemplate = @'
 #!/bin/sh
 # context-keeper deploy-on-push
 #
@@ -125,7 +164,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
 
   echo ""
   echo "  deploying before push (pre-push hook)..."
-  if ! npx wrangler deploy; then
+  if ! __DEPLOY_CMD__; then
     echo ""
     echo "  DEPLOY FAILED -- push aborted." >&2
     echo "  origin has not been updated, so main will not drift ahead of the" >&2
@@ -138,6 +177,7 @@ done
 
 exit 0
 '@ -replace "`r`n", "`n"
+$hook = $hookTemplate.Replace('__DEPLOY_CMD__', $deployCmd)
 
 [IO.File]::WriteAllText($hookFile, $hook, (New-Object System.Text.UTF8Encoding $false))
 
