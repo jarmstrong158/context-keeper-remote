@@ -149,5 +149,62 @@
     "updated_at": "2026-08-06T04:27:31.736534+00:00",
     "verified_at": "2026-08-06T04:27:31.736534+00:00",
     "verified_sha": "71015610ee11cdf4f5bc7543ffdd5d0b6f3a442f"
+  },
+  {
+    "id": "dec-004-8f6b",
+    "summary": "cambium-remote gained GET /status/<STATUS_TOKEN>, a status-only credential, and the phone view wires to that rather than to cambium's connector URL. Because the token is generated rather than looked up, a script installs it on both Workers with nothing for a human to paste.",
+    "problem": "The Knowledge tab needed CAMBIUM_STATUS_URL, and the only way to supply it was to paste cambium-remote's connector URL out of claude.ai. That URL is cambium-remote's AUTH_TOKEN, which grants recall over every promoted item in the team and org scopes, on the Worker whose team scope reaches every repo under TEAM_OWNER including private ones. Rendering three integers on a phone would have copied a full-access credential into a second Worker, so a leak of the second would disclose the reach of the first. It also could not be automated at all: Cloudflare stores secrets write-only, so AUTH_TOKEN can only ever be re-typed by hand, which is exactly the manual credential handling these setup scripts exist to eliminate.",
+    "why_chosen": "A second, narrower credential solves the security problem and the automation problem with one mechanism. STATUS_TOKEN grants exactly one read -- the counts -- and cannot call recall or reach the knowledge itself, so the blast radius of the thing now stored in two places is three integers rather than an account's entire promoted knowledge. Because it is generated rather than discovered, a script can mint it, install it on cambium-remote, verify the route answers, and only then install the derived URL on the consumer. Rotation is re-running the script, and it is invisible to every MCP client because it is not the connector token. This is the same shape as VIEW_TOKEN in dec-002 and for the same reason: a surface that needs less access should hold a credential that grants less.",
+    "what_we_tried": "First implementation was scripts/set-cambium-url.ps1, which prompted for the connector URL with -AsSecureString and verified it before installing. It was rejected on the user's objection that a setup script exists precisely so nobody has to go and find a secret, and on the observation, made while reading cambium-remote's auth code, that the pasted value would have been a full-access token. Cloudflare service bindings were considered as a zero-credential alternative and set aside: cambium-remote cannot distinguish a binding call from an internet call without a shared secret anyway, so it would have hidden the credential rather than removed it.",
+    "tradeoffs": "A third credential to reason about across the stack, and cambium-remote now has two auth paths rather than one, which is more surface to keep correct -- mitigated by testing both directions of refusal. The consumer still accepts the old /mcp/ URL shape so existing deployments keep working, which means the insecure wiring remains possible for anyone who already configured it that way. The status route also discloses counts, and repo names in allowlist mode, to anyone holding STATUS_TOKEN.",
+    "alternatives": [
+      {
+        "option": "Paste cambium-remote's connector URL",
+        "reason_rejected": "Requires a human to fetch a secret by hand, and stores a recall-capable credential in a second Worker in order to read three numbers."
+      },
+      {
+        "option": "Cloudflare service binding between the two Workers",
+        "reason_rejected": "cambium-remote cannot tell a binding call from an internet call without a shared secret, so it hides the credential rather than removing it."
+      },
+      {
+        "option": "Rotate cambium-remote's AUTH_TOKEN from the script and use the new value",
+        "reason_rejected": "Breaks the live claude.ai connector until the user updates it there by hand, trading a one-time paste for a guaranteed outage plus a paste."
+      }
+    ],
+    "constraints_created": [
+      "Neither token may be accepted on the other's route; both directions are tested in cambium-remote/test/status-route.test.ts",
+      "Unset STATUS_TOKEN must 404 the status route, so a deployment that never opted in carries no extra surface",
+      "The two Workers use different wrangler environments -- cambium-remote has no env.production -- so setup scripts must not share an --env flag between them"
+    ],
+    "related_to": [
+      "dec-002-ca5b",
+      "dec-003-0a24",
+      "con-001-7fb5"
+    ],
+    "tags": [
+      "cambium",
+      "auth",
+      "credentials",
+      "view",
+      "knowledge",
+      "worker",
+      "setup",
+      "least-privilege"
+    ],
+    "retrieval_hints": [
+      "why does cambium have two tokens",
+      "how do I connect the Knowledge tab",
+      "STATUS_TOKEN vs AUTH_TOKEN",
+      "knowledge panel says not connected",
+      "why not just paste the connector url"
+    ],
+    "origin": "user",
+    "schema_version": 4,
+    "status": "active",
+    "superseded_by": null,
+    "created_at": "2026-08-06T12:23:58.575646+00:00",
+    "updated_at": "2026-08-06T12:23:58.575646+00:00",
+    "verified_at": "2026-08-06T12:23:58.575646+00:00",
+    "verified_sha": "6960bea9afb1a5db2bfc640eed536f3522bb21fd"
   }
 ]
