@@ -312,6 +312,35 @@ The setup script reads it **before** installing anything and refuses to run
 without it. That ordering is deliberate: a token installed with no URL to put it
 in is unrecoverable, since Cloudflare cannot read a secret back.
 
+### Platform support, honestly
+
+| script | Windows | macOS / Linux |
+|---|---|---|
+| `set-view-token` | `.cmd` / `.ps1` | **`.sh`** |
+| `connect-cambium` | `.cmd` / `.ps1` | not ported — see below |
+| `install-deploy-hook` | `.cmd` / `.ps1` | not ported — see below |
+| `fix-cambium-ci` | `.cmd` / `.ps1` | not ported — see below |
+
+The three that aren't ported are thin wrappers around a handful of commands, so
+the manual equivalents are short. **Connect cambium:**
+
+```bash
+TOKEN=$(head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=
+')
+printf '%s' "$TOKEN" | (cd ../cambium-remote && npx wrangler secret put STATUS_TOKEN)
+# wait ~60s for the new version to roll out, then check it answers with counts:
+curl -s "https://cambium-remote.<account>.workers.dev/status/$TOKEN" | head -c 200
+printf '%s' "https://cambium-remote.<account>.workers.dev/status/$TOKEN"   | npx wrangler secret put CAMBIUM_STATUS_URL --env production
+```
+
+**Deploy on push** — write `.git/hooks/pre-push` in the target repo, LF endings,
+`chmod +x`, running `npx wrangler deploy` (add `--env <name>` if that repo has
+named environments — a bare deploy there targets the self-host profile and will
+bind your live Worker to a fresh empty database).
+
+**Fix the CI** — `gh secret set CLOUDFLARE_ACCOUNT_ID` and
+`gh secret set CLOUDFLARE_API_TOKEN` against the repo, reading each from stdin.
+
 ### Editing the setup scripts
 
 They target **Windows PowerShell 5.1** — the version that ships with Windows and
