@@ -66,5 +66,40 @@
     "updated_at": "2026-08-06T03:30:55.271975+00:00",
     "verified_at": "2026-08-06T03:30:55.233409+00:00",
     "verified_sha": "22f7fd1eba3da7fe67446cd3a6cb60f3ab3ea1ef"
+  },
+  {
+    "id": "con-003-163b",
+    "rule": "Never hand someone a Windows path with backslashes as a runnable command. Give an npm script, or a path with forward slashes. Backslash is an escape character in bash, so a copied Windows path silently mangles itself instead of failing loudly.",
+    "reason": "In bash -- Git Bash, WSL, and the shell behind most run-this buttons -- scripts\\set-view-token.cmd collapses to scriptsset-view-token.cmd and reports command not found. That failure names a file nobody wrote, so it does not point back at the path separator; it looks like a missing or broken script. There is no output, no log, and no exit path through the program itself, which means every diagnostic that assumes the program ran is chasing nothing. Forward slashes work on Windows for interpreter arguments, and an npm script has no separator at all, so both survive either shell.",
+    "triggering_incident": "Two full debugging rounds were spent on set-view-token failing, including adding a dry-run mode and a self-writing log, before anyone checked whether the script was running at all. It was not: the command had been given as scripts\\set-view-token.cmd inside a bash-tagged block. The missing log file was the clue -- the transcript starts near the top of the script, so its absence meant execution never began, not that it failed early.",
+    "enforced_by": "npm run set-view-token in package.json scripts -- the documented entry point; verified from both bash and PowerShell",
+    "scope": "README.md",
+    "hardness": "absolute",
+    "related_to": [
+      "con-001-7fb5",
+      "con-002-b4cc"
+    ],
+    "tags": [
+      "docs",
+      "windows",
+      "bash",
+      "cross-shell",
+      "gotcha",
+      "onboarding"
+    ],
+    "retrieval_hints": [
+      "command not found but the file exists",
+      "backslash path does not work in git bash",
+      "script produced no output and no log",
+      "why did my windows command mangle itself",
+      "how should runnable commands be written in the readme"
+    ],
+    "origin": "agent",
+    "schema_version": 4,
+    "status": "active",
+    "created_at": "2026-08-06T04:00:19.070963+00:00",
+    "updated_at": "2026-08-06T04:00:24.878819+00:00",
+    "verified_at": "2026-08-06T04:00:24.837990+00:00",
+    "verified_sha": "9786797e3d687a1484f54a497092111a860f3d28"
   }
 ]
