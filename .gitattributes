@@ -1,0 +1,12 @@
+# Line endings for the setup scripts. Scoped narrowly on purpose -- a blanket
+# "* text=auto" would renormalize every existing file and bury real changes in a
+# whole-repo whitespace diff.
+#
+# The .sh entry is the load-bearing one: cloned on Windows without it, git would
+# hand out CRLF and the shebang becomes "#!/usr/bin/env bash\r", which fails as
+# "bad interpreter: No such file or directory" -- an error that names a file that
+# plainly exists, so it reads as a broken script rather than a checkout setting.
+*.sh   text eol=lf
+*.cmd  text eol=crlf
+*.bat  text eol=crlf
+*.ps1  text eol=crlf

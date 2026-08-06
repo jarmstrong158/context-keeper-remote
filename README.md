@@ -112,6 +112,64 @@ Incoming ids are preserved; existing ids are reported, never overwritten.
 
 ---
 
+## The phone view (optional)
+
+`GET /view/<VIEW_TOKEN>` serves a read-only, server-rendered page: every project,
+its active decisions and constraints, and — if `CAMBIUM_STATUS_URL` is set — the
+team/org knowledge counts from cambium-remote. It is built for glancing at on a
+phone, and it is the answer to "what did we decide?" when you are not at a machine.
+
+Two properties are deliberate, and both are enforced in code:
+
+- **Its own credential.** The view runs on `VIEW_TOKEN`, never `AUTH_TOKEN`. Each
+  route refuses the other's token, so handing someone a view URL does not hand them
+  write access, and it can be rotated without touching any MCP connector.
+- **Unset means gone.** With no `VIEW_TOKEN`, `/view/<anything>` returns a bare
+  `404` — indistinguishable from a route that was never deployed. The feature is
+  opt-in by having a credential at all, so an unconfigured deploy has no extra
+  attack surface.
+
+`CAMBIUM_STATUS_URL` is optional and fails soft: if cambium-remote is slow (2.5s
+budget), down, or unset, the page still renders and says the knowledge counts are
+unavailable rather than erroring or hanging.
+
+### Setting `VIEW_TOKEN`
+
+Run the script for your platform, from a clone of this repo:
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts/set-view-token.ps1
+```
+
+(or double-click `scripts/set-view-token.cmd`; on macOS/Linux,
+`scripts/set-view-token.sh`.)
+
+It generates 32 bytes from the OS CSPRNG, pipes them to `wrangler secret put` over
+**stdin**, copies the finished view URL to your clipboard, prints only a masked
+form, and then verifies the route answers `200`.
+
+Every one of those is load-bearing, because the whole point of a separate token is
+lost if setting it leaks it. Passing a secret as an **argument** puts it in your
+shell history and in the process list for every other user on the machine, for the
+lifetime of the call. **Echoing** it puts it in terminal scrollback, in any
+screen-share or screenshot, and in the transcript of any coding agent that ran the
+command — which is not hypothetical here: see the audit numbers in the next
+section. The script avoids all three, so the only two places the token ends up are
+Cloudflare and your clipboard.
+
+**Paste it into your password manager immediately.** Cloudflare stores secrets
+write-only; you cannot read one back, only replace it. Losing the URL means
+re-running the script, which invalidates the old one.
+
+To rotate, re-run with `-Rotate` (PowerShell) to skip the confirmation. Rotating
+invalidates every existing view URL at once and leaves `AUTH_TOKEN` untouched.
+
+If you'd rather not run a script, `npx wrangler secret put VIEW_TOKEN --env production`
+prompts for the value without echoing it — you just have to generate it yourself
+(`openssl rand -base64 32`) and be careful about where that lands.
+
+---
+
 ## ⚠️ Security: the connector URL is a credential
 
 The URL you paste into Claude **embeds `AUTH_TOKEN`** as its last path segment.
@@ -125,6 +183,12 @@ store. Treat it exactly like a password:
   **immediately invalidates every old URL** — any connector using the previous
   token starts getting `404`s until you update it in claude.ai (Step 3) with the new
   value.
+
+Everything in this section applies to the **view URL** too, with one difference in
+your favour: `VIEW_TOKEN` can only read. A leaked view URL exposes every decision
+summary in every project on the instance, which may well be the more sensitive half
+— but it cannot write, deprecate, or delete anything. That is the entire reason the
+two are separate credentials rather than one.
 
 ### Why the token is in the URL path, and what that costs you
 
