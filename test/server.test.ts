@@ -476,7 +476,10 @@ describe("read-only view (/view/:token)", () => {
     const body = await (
       await SELF.fetch(`https://w.example.com/view/${VIEW}?t=know`)
     ).text();
-    expect(body).toContain("CAMBIUM_STATUS_URL");
+    // The message now names the SCRIPT rather than the env var, because
+    // "set CAMBIUM_STATUS_URL" is not an action anyone can take directly --
+    // connect-cambium is what produces the value.
+    expect(body).toContain("connect-cambium");
     expect(body).toContain("desktop-only");
   });
 

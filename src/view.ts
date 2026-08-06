@@ -53,6 +53,18 @@ interface KnowledgeSummary {
   orgActive: number;
   teamRepos: number;
   error?: string;
+  // Everything below comes from the same status call and was previously thrown
+  // away. The counts alone answer "is anything there"; these answer "should I
+  // trust it", which is the question you actually have when reading knowledge
+  // an agent will act on.
+  orgRepo?: string | null;
+  teamOwner?: string | null;
+  teamBranch?: string;
+  scopeMode?: string;
+  knowledgePath?: string;
+  repoNames?: string[];
+  trustModel?: string;
+  scopeErrors?: Record<string, string>;
 }
 
 /** Ask cambium-remote for its status counts. Never throws.
@@ -133,10 +145,25 @@ async function fetchKnowledge(
     // The status route returns the tool's own object; the MCP route wraps it.
     const c = statusOnly ? body?.counts : body?.result?.structuredContent?.counts;
     if (!c) return { teamActive: 0, orgActive: 0, teamRepos: 0, error: "unexpected response" };
+    const cfg = statusOnly ? body?.configured : body?.result?.structuredContent?.configured;
+    const errs = statusOnly ? body?.errors : body?.result?.structuredContent?.errors;
+    const trust = statusOnly ? body?.trust_model : body?.result?.structuredContent?.trust_model;
+    // team_repos is either the list or a string explaining why it is withheld,
+    // because discovered names can enumerate private repositories. Only treat
+    // it as names when it really is an array.
+    const names = Array.isArray(cfg?.team_repos) ? (cfg.team_repos as string[]) : undefined;
     return {
       teamActive: Number(c.team_active || 0),
       orgActive: Number(c.org_active || 0),
       teamRepos: Number(c.team_repos || 0),
+      orgRepo: cfg?.org_repo ?? null,
+      teamOwner: cfg?.team_owner ?? null,
+      teamBranch: cfg?.team_branch,
+      scopeMode: cfg?.team_scope_mode,
+      knowledgePath: cfg?.knowledge_path,
+      repoNames: names,
+      trustModel: typeof trust === "string" ? trust : undefined,
+      scopeErrors: errs && typeof errs === "object" ? (errs as Record<string, string>) : undefined,
     };
   } catch (e) {
     return {
@@ -307,25 +334,13 @@ async function renderHome(
 
   const knowledgeHtml = !knowledge
     ? `<h2>Knowledge</h2><div class="note"><b>Not connected.</b> cambium's distilled
-       knowledge lives in cambium-remote. Set <code>CAMBIUM_STATUS_URL</code> here to
-       show its team and org counts. Local scope is desktop-only by design and never
-       appears anywhere but the machine that learned it.</div>`
+       knowledge lives in cambium-remote. Run <code>connect-cambium</code> to wire it.
+       Local scope is desktop-only by design and never appears anywhere but the
+       machine that learned it.</div>`
     : knowledge.error
       ? `<h2>Knowledge</h2><div class="note"><b>cambium-remote ${esc(knowledge.error)}.</b>
-         The decision logs above are this Worker's own data and are unaffected.</div>`
-      : `<h2>Knowledge</h2>
-         <ul>
-           <li class="p"><span class="pn">team</span>
-             <span class="pc">${knowledge.teamActive}<i> items</i></span>
-             <span class="ts">${knowledge.teamRepos} repos</span></li>
-           <li class="p"><span class="pn">org</span>
-             <span class="pc">${knowledge.orgActive}<i> items</i></span>
-             <span class="ts"></span></li>
-         </ul>
-         <div class="note"><b>Local scope is not shown.</b> It is desktop-only by
-         design, so it never leaves the machine that learned it &mdash; and it is the
-         staging area, not the part that gets read. Promoted knowledge is what
-         recall actually returns.</div>`;
+         The decision logs are this Worker's own data and are unaffected.</div>`
+      : knowledgePanel(knowledge);
 
   // One tab renders at a time. The desktop dashboard hides the others with
   // JavaScript; here the tab is in the URL instead, so each one is a real page
@@ -548,6 +563,21 @@ td{padding:9px 6px;border-bottom:1px solid var(--line)}
 td a{color:inherit;text-decoration:none;font-weight:560}
 .num{text-align:right;font-variant-numeric:tabular-nums;color:var(--dim)}
 .num.bad{color:#f2545b}
+/* --- knowledge --- */
+.kgrid{display:flex;gap:10px;padding:4px 16px 0}
+.kcard{flex:1;border:1px solid var(--line);border-radius:11px;background:var(--pan);
+ padding:13px 14px;min-width:0}
+.kn{font-size:27px;font-weight:640;letter-spacing:-.02em;font-variant-numeric:tabular-nums;
+ line-height:1.1}
+.kl{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--dim2);
+ margin-top:3px;font-weight:600}
+.kd{font-size:11.5px;color:var(--dim);margin-top:6px;line-height:1.4;
+ overflow-wrap:anywhere}
+.note.warn{border-color:rgba(240,180,41,.45)}
+.note.warn b{color:var(--warn)}
+.chips.rl{padding:0 16px;margin-top:6px}
+.note .kv{display:block;margin:5px 0;font-family:ui-monospace,Menlo,monospace;
+ font-size:11.5px}
 .more{padding:14px 16px}
 .more a{color:var(--dim);font-size:12.5px}
 </style></head><body>
@@ -564,4 +594,92 @@ td a{color:inherit;text-decoration:none;font-weight:560}
   the connector token, so rotating it does not disturb any MCP client.
 </footer>
 </body></html>`;
+}
+
+/**
+ * The Knowledge tab.
+ *
+ * Three integers was not enough to be worth opening. The same status call
+ * already carries what scope is configured, which repos it reads, and -- most
+ * importantly -- the trust model, and all of that was being discarded.
+ *
+ * The trust model is the part that belongs on a phone. cambium's team scope in
+ * `discover` mode is a READ SELECTOR, not an authorization control: any repo
+ * under the owner with the right branch is read, and recall output is exactly
+ * what an agent treats as established fact. Whether that set is discovered or
+ * allowlisted changes how much weight you should put on anything you read
+ * here, so it is stated up front rather than buried in a README.
+ *
+ * What is NOT here is the knowledge itself. STATUS_TOKEN grants the counts and
+ * nothing else -- reading items needs `recall`, which is deliberately out of
+ * reach (dec-004). The panel says so rather than leaving you to wonder why a
+ * knowledge tab shows no knowledge.
+ */
+function knowledgePanel(k: KnowledgeSummary): string {
+  const discovered = k.scopeMode === "discover";
+  const total = k.teamActive + k.orgActive;
+
+  const errs = k.scopeErrors && Object.keys(k.scopeErrors).length
+    ? `<div class="note warn"><b>Some scopes reported errors.</b>${Object.entries(k.scopeErrors)
+        .map(([scope, msg]) => `<div class="kv"><span>${esc(scope)}</span>${esc(msg)}</div>`)
+        .join("")}These counts are therefore a floor, not a total.</div>`
+    : "";
+
+  const repos = k.repoNames?.length
+    ? `<h2>Repos read <span class="cnt">${k.repoNames.length}</span></h2>
+       <div class="chips rl">${k.repoNames.map((r) => `<span class="chip">${esc(r)}</span>`).join("")}</div>`
+    : k.teamRepos
+      ? `<div class="note">Repo <b>names</b> are hidden. In discover mode they are the
+         output of a scan over everything <code>${esc(k.teamOwner ?? "the owner")}</code>
+         owns, so listing them would enumerate private repositories to anyone holding
+         this URL. The count answers the diagnostic question either way.</div>`
+      : "";
+
+  return `<h2>Knowledge <span class="cnt">${total} items</span></h2>
+    <div class="kgrid">
+      <div class="kcard">
+        <div class="kn">${k.teamActive}</div>
+        <div class="kl">team</div>
+        <div class="kd">promoted across ${k.teamRepos} repo${k.teamRepos === 1 ? "" : "s"}</div>
+      </div>
+      <div class="kcard">
+        <div class="kn">${k.orgActive}</div>
+        <div class="kl">org</div>
+        <div class="kd">${k.orgRepo ? esc(k.orgRepo) : "not configured"}</div>
+      </div>
+    </div>
+
+    ${errs}
+
+    <h2>Trust</h2>
+    <div class="note ${discovered ? "warn" : ""}">
+      <b>${discovered ? "Team scope is discovered, not authorized." : "Team scope is an allowlist."}</b>
+      ${esc(k.trustModel ?? "")}
+    </div>
+
+    <h2>Configured</h2>
+    <ul>
+      <li class="p"><span class="pn">scope mode</span>
+        <span class="pc">${esc(k.scopeMode ?? "?")}</span></li>
+      <li class="p"><span class="pn">team owner</span>
+        <span class="pc">${esc(k.teamOwner ?? "-")}</span></li>
+      <li class="p"><span class="pn">branch</span>
+        <span class="pc">${esc(k.teamBranch ?? "-")}</span></li>
+      <li class="p"><span class="pn">org repo</span>
+        <span class="pc">${esc(k.orgRepo ?? "-")}</span></li>
+      <li class="p"><span class="pn">file</span>
+        <span class="pc">${esc(k.knowledgePath ?? "-")}</span></li>
+    </ul>
+
+    ${repos}
+
+    <div class="note"><b>The items themselves are not shown here.</b> This page reads
+    cambium over a status-only credential that returns counts and nothing else;
+    fetching the knowledge would need <code>recall</code>, which that credential
+    deliberately cannot do. Ask Claude to <code>recall</code> when you want the
+    content.</div>
+
+    <div class="note"><b>Local scope is not counted.</b> It is desktop-only by design,
+    so it never leaves the machine that learned it &mdash; and it is the staging area,
+    not the part that gets read. Promoted knowledge is what recall actually returns.</div>`;
 }
