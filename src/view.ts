@@ -60,11 +60,26 @@ interface KnowledgeSummary {
  */
 async function fetchKnowledge(url: string | undefined): Promise<KnowledgeSummary | null> {
   if (!url) return null;
+
+  // Two accepted shapes, and the difference is a security one.
+  //
+  //   /status/<STATUS_TOKEN>  GET. Grants the counts and nothing else.
+  //   /mcp/<AUTH_TOKEN>       POST. The full connector -- it also grants recall
+  //                           over every promoted item in the team and org
+  //                           scopes.
+  //
+  // The second is supported because it is what an existing deployment already
+  // has configured, but the first is what setup installs now: reading three
+  // integers should not require storing a credential that can read the
+  // knowledge itself. A leak of this Worker's secrets then discloses counts
+  // rather than cambium's entire reach.
+  const statusOnly = /\/status\/[^/]+\/?$/.test(url);
+
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), CAMBIUM_TIMEOUT_MS);
   try {
     const res = await fetch(url, {
-      method: "POST",
+      method: statusOnly ? "GET" : "POST",
       signal: ctrl.signal,
       headers: {
         "content-type": "application/json",
@@ -73,16 +88,19 @@ async function fetchKnowledge(url: string | undefined): Promise<KnowledgeSummary
         // client UA, and the failure presents as a silent empty panel.
         "user-agent": "context-keeper-view/1.0",
       },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "tools/call",
-        params: { name: "status", arguments: {} },
-      }),
+      body: statusOnly
+        ? undefined
+        : JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/call",
+            params: { name: "status", arguments: {} },
+          }),
     });
     if (!res.ok) return { teamActive: 0, orgActive: 0, teamRepos: 0, error: "http " + res.status };
     const body: any = await res.json();
-    const c = body?.result?.structuredContent?.counts;
+    // The status route returns the tool's own object; the MCP route wraps it.
+    const c = statusOnly ? body?.counts : body?.result?.structuredContent?.counts;
     if (!c) return { teamActive: 0, orgActive: 0, teamRepos: 0, error: "unexpected response" };
     return {
       teamActive: Number(c.team_active || 0),
