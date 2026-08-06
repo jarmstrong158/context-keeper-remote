@@ -56,8 +56,18 @@
 .PARAMETER NoBrowser
   Do not open the view when it comes up.
 
+.PARAMETER DryRun
+  Run every step except the two that change or reveal anything -- the secret is
+  not installed and the route is not probed. Exists because the install step is
+  otherwise untestable: you cannot exercise it without writing a real production
+  credential, which means the one path most likely to fail is the one path
+  nobody checks until it fails for a user. With this, the whole preamble can be
+  run safely and repeatedly, and a failure reports where it happened.
+
 .EXAMPLE
   .\scripts\set-view-token.ps1
+.EXAMPLE
+  .\scripts\set-view-token.ps1 -DryRun
 .EXAMPLE
   .\scripts\set-view-token.ps1 -WranglerEnv "" -WorkerUrl https://my-worker.me.workers.dev
 #>
@@ -66,7 +76,8 @@ param(
     [string]$WranglerEnv = "production",
     [string]$WorkerUrl = "",
     [switch]$Yes,
-    [switch]$NoBrowser
+    [switch]$NoBrowser,
+    [switch]$DryRun
 )
 
 $ErrorActionPreference = "Stop"
@@ -195,6 +206,17 @@ $token = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replac
 $mask  = $token.Substring(0, 4) + ("." * 12) + $token.Substring($token.Length - 4)
 
 # --- 5. install -----------------------------------------------------------
+if ($DryRun) {
+    Write-Host "  installing VIEW_TOKEN... SKIPPED (-DryRun)" -ForegroundColor Yellow
+    Say "would run: npx wrangler secret put VIEW_TOKEN $($envArgs -join ' ')  (token on stdin)"
+    Say "would then poll $WorkerUrl/view/$mask until it returns 200"
+    Write-Host ""
+    Write-Host "  dry run complete -- every step before the install succeeded." -ForegroundColor Green
+    Say "Nothing was installed and nothing was probed."
+    Write-Host ""
+    exit 0
+}
+
 Write-Host "  installing VIEW_TOKEN..." -NoNewline
 $put = Invoke-Wrangler -WranglerArgs (@("secret", "put", "VIEW_TOKEN") + $envArgs) -StdIn $token
 if ($put.Code -ne 0) {

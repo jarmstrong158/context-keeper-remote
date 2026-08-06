@@ -84,6 +84,20 @@ fi
 TOKEN="$(head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=\n')"
 MASK="${TOKEN:0:4}............${TOKEN: -4}"
 
+# CK_DRY_RUN runs every step except the two that change or reveal anything.
+# The install step is otherwise untestable -- exercising it means writing a real
+# production credential, so the path most likely to fail is the one nobody
+# checks until it fails for a user.
+if [ -n "${CK_DRY_RUN-}" ]; then
+  printf '  installing VIEW_TOKEN... SKIPPED (CK_DRY_RUN)\n'
+  say "would run: npx wrangler secret put VIEW_TOKEN ${ENV_ARGS[*]-}  (token on stdin)"
+  say "would then poll $WORKER_URL/view/$MASK until it returns 200"
+  printf '\n  dry run complete -- every step before the install succeeded.\n'
+  say "Nothing was installed and nothing was probed."
+  printf '\n'
+  exit 0
+fi
+
 printf '  installing VIEW_TOKEN...'
 # STDIN, never argv: an argument is visible in the process list to other users.
 if ! printf '%s' "$TOKEN" | npx wrangler secret put VIEW_TOKEN "${ENV_ARGS[@]}" >/dev/null 2>&1; then
