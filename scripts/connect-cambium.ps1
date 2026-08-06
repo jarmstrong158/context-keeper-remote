@@ -54,12 +54,47 @@ $localEnvArgs   = @(); if ($LocalEnv)   { $localEnvArgs   = @("--env", $LocalEnv
 
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
+# Relocate into the repo. Without this, npx resolves wrangler from the NETWORK
+# rather than node_modules whenever the script is launched from anywhere else --
+# which is slower, needs connectivity, and on a fresh cache prints an
+# "Ok to proceed?" prompt that a double-clicked window will sit on forever.
+Set-Location $repo
+
+# Every run records itself, for the same reason set-view-token.ps1 does: a
+# double-clicked console can close, scroll, or lead with the least informative
+# line of a PowerShell dump, so "what did it say?" is a bad question to have to
+# ask. Nothing secret reaches this log -- the token is generated after it opens
+# and is never written to the host -- but it is scrubbed on exit regardless.
+$script:LogPath = Join-Path $repo ".cambium-setup.log"
+$script:LogOn = $false
+$script:TokenSeen = $null
+$script:MaskSeen = $null
+try { Start-Transcript -Path $script:LogPath -Force | Out-Null; $script:LogOn = $true } catch { }
+
+function Stop-Log {
+    if ($script:LogOn) { try { Stop-Transcript | Out-Null } catch { }; $script:LogOn = $false }
+    if ($script:TokenSeen -and (Test-Path $script:LogPath)) {
+        try {
+            $raw = Get-Content $script:LogPath -Raw
+            Set-Content -Path $script:LogPath -Value $raw.Replace($script:TokenSeen, $script:MaskSeen) -Encoding UTF8
+        } catch { }
+    }
+}
+
 try {
     [Net.ServicePointManager]::SecurityProtocol =
         [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 } catch { }
 
-function Fail($m) { Write-Host "`n  ERROR: $m`n" -ForegroundColor Red; exit 1 }
+function Fail($m) {
+    Write-Host "`n  ERROR: $m`n" -ForegroundColor Red
+    Stop-Log
+    if (Test-Path $script:LogPath) {
+        Write-Host "  Full log (safe to share): $script:LogPath" -ForegroundColor DarkGray
+        Write-Host ""
+    }
+    exit 1
+}
 function Say($m)  { Write-Host "  $m" }
 
 # con-002: on PS 5.1, 2>&1 on a native command wraps stderr in ErrorRecords and
@@ -82,6 +117,18 @@ function Invoke-Wrangler {
         $ErrorActionPreference = $prev
         Set-Location $prevLoc
     }
+}
+
+trap {
+    Write-Host "`n  UNHANDLED ERROR" -ForegroundColor Red
+    Write-Host "    $($_.Exception.GetType().Name): $($_.Exception.Message)" -ForegroundColor Red
+    if ($_.InvocationInfo) {
+        Write-Host "    at script line $($_.InvocationInfo.ScriptLineNumber): $($_.InvocationInfo.Line.Trim())" -ForegroundColor Red
+    }
+    Stop-Log
+    if (Test-Path $script:LogPath) { Write-Host "`n  Full log: $script:LogPath" -ForegroundColor DarkGray }
+    Write-Host ""
+    exit 1
 }
 
 Write-Host ""
@@ -145,7 +192,7 @@ if ($existing.Output -match '"name"\s*:\s*"STATUS_TOKEN"' -and -not $Yes) {
     }
     $go = ""
     try { $go = [string](Read-Host "  Replace it? [y/N]") } catch { $go = "" }
-    if ($go -notmatch '^\s*[Yy]') { Write-Host "  cancelled.`n"; exit 0 }
+    if ($go -notmatch '^\s*[Yy]') { Write-Host "  cancelled.`n"; Stop-Log; exit 0 }
 }
 
 if ($DryRun) {
@@ -156,6 +203,8 @@ if ($DryRun) {
     Say "would poll $CambiumUrl/status/<token> until it returns counts"
     Say "would then set CAMBIUM_STATUS_URL here"
     Say "Nothing was installed and nothing was probed."
+    Stop-Log
+    Say "log: $script:LogPath"
     Write-Host ""
     exit 0
 }
@@ -168,6 +217,8 @@ $bytes = New-Object byte[] 32
 $rng.GetBytes($bytes); $rng.Dispose()
 $token = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
 $mask = $token.Substring(0, 4) + ("." * 12) + $token.Substring($token.Length - 4)
+$script:TokenSeen = $token
+$script:MaskSeen  = $mask
 
 # --- install on cambium-remote -------------------------------------------
 Write-Host "  installing STATUS_TOKEN on cambium-remote..." -NoNewline
@@ -223,3 +274,4 @@ Say "This token can read those counts and nothing else -- not recall, not the"
 Say "knowledge itself. Rotating it means re-running this, and no MCP client"
 Say "notices, because it is not the connector token."
 Write-Host ""
+Stop-Log
