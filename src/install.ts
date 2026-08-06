@@ -63,10 +63,6 @@ export function sessionCookie(token: string): string {
   );
 }
 
-/** Set-Cookie that clears it, for an explicit sign-out on a shared device. */
-export function clearCookie(): string {
-  return `${COOKIE_NAME}=; Max-Age=0; Path=/view; HttpOnly; Secure; SameSite=Lax`;
-}
 
 /**
  * Pull one cookie out of a Cookie header.

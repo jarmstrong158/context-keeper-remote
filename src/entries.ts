@@ -3,13 +3,10 @@
 
 import {
   type Entry,
-  type EntryRow,
   type Kind,
   type Status,
   getEntry,
-  hydrate,
   nextId,
-  PREFIX,
 } from "./db";
 
 export function nowIso(): string {
@@ -403,8 +400,4 @@ export function scoreEntry(entry: Entry, terms: string[]): number {
   return score;
 }
 
-export function hydrateRows(rows: EntryRow[] | undefined): Entry[] {
-  return (rows ?? []).map(hydrate);
-}
 
-export const KIND_PREFIXES = PREFIX;

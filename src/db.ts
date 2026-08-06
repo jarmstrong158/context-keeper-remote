@@ -17,11 +17,6 @@ export const PREFIX: Record<Kind, string> = {
 };
 
 // Reverse lookup so we can infer a kind from an id prefix when needed.
-export const KIND_BY_PREFIX: Record<string, Kind> = {
-  dec: "decision",
-  pipe: "pipeline",
-  con: "constraint",
-};
 
 // The global (project-less) scope used for config like `default_project`.
 export const GLOBAL_SCOPE = "";
