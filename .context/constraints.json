@@ -209,5 +209,40 @@
     "updated_at": "2026-08-06T12:53:36.693833+00:00",
     "verified_at": "2026-08-06T12:53:36.660301+00:00",
     "verified_sha": "0fc92d509c110452e1ab0ee1af1b7aafb846003b"
+  },
+  {
+    "id": "con-007-1de7",
+    "rule": "A Worker cannot reach another Worker by fetching its workers.dev hostname. Use a service binding. Declare it in BOTH the top-level and the named-environment section, since named environments inherit nothing.",
+    "reason": "Cloudflare does not route a Worker subrequest to a workers.dev host: the edge answers 404 and the target Worker never executes. From the calling side that is byte-identical to the target rejecting the credential, so the obvious diagnosis is a wrong or unpropagated token, and every fix aimed there is aimed at nothing. The only signal that distinguishes them is the absence of ANY request in the target's own logs. A service binding dispatches in-process -- no DNS, TLS, or egress -- and the request still arrives at the target's normal handler and is still checked against its secret, so the binding replaces the transport and changes nothing about authorization. Keep a plain-fetch fallback for a target on a custom domain, which is routable, or one in another account where no binding can exist.",
+    "triggering_incident": "The Knowledge panel reported \"http 404\" with a STATUS_TOKEN that was verifiably correct on both Workers -- the setup script had polled the same URL from the operator's machine and got 200 with counts before installing it. Three rounds went into token propagation and rotation timing before wrangler tail on cambium-remote showed ZERO requests arriving, which proved the call was never reaching it. Adding [[services]] fixed it immediately. The binding then exposed a second layer: with the call finally arriving, it timed out every time, because cambium's status does a GitHub discovery scan across every repo under TEAM_OWNER and the budget was 2500ms -- and that fetch was running on EVERY home page load, not just the tab that renders it.",
+    "enforced_by": "wrangler.toml -- [[services]] and [[env.production.services]] binding CAMBIUM; vitest.config.ts must stub it or miniflare refuses to start and the whole suite dies",
+    "scope": "src/view.ts",
+    "hardness": "absolute",
+    "related_to": [
+      "dec-004-8f6b",
+      "con-006-f0f1"
+    ],
+    "tags": [
+      "cloudflare",
+      "workers",
+      "service-binding",
+      "networking",
+      "gotcha",
+      "cambium"
+    ],
+    "retrieval_hints": [
+      "worker fetch to another worker returns 404",
+      "workers.dev not reachable from a worker",
+      "target worker logs show no request",
+      "how do workers call each other",
+      "service binding vs fetch"
+    ],
+    "origin": "agent",
+    "schema_version": 4,
+    "status": "active",
+    "created_at": "2026-08-06T13:12:31.593530+00:00",
+    "updated_at": "2026-08-06T13:12:31.593530+00:00",
+    "verified_at": "2026-08-06T13:12:31.593530+00:00",
+    "verified_sha": "13c90fb5c9b334b62efb9b62b125aa5397eb266e"
   }
 ]
