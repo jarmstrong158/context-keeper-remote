@@ -4,3 +4,9 @@ dist/
 .dev.vars
 *.log
 .DS_Store
+
+# The store's own memory IS tracked here (.context/decisions.json) -- but not
+# its per-machine byproducts. usage.json is retrieval telemetry that churns on
+# every read, and embeddings.json is a derived cache; neither belongs in git.
+.context/usage.json
+.context/embeddings.json
