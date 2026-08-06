@@ -88,5 +88,66 @@
     "updated_at": "2026-08-06T02:59:04.572100+00:00",
     "verified_at": "2026-08-06T02:59:04.536343+00:00",
     "verified_sha": "5612a3b7ba7b220e1b0d657b6ca7e8a05e6d079f"
+  },
+  {
+    "id": "dec-003-0a24",
+    "summary": "The view is enrolled once by token URL and used thereafter by a long-lived HttpOnly cookie, installed as a PWA. The cookie carries the same VIEW_TOKEN and is compared the same way, so there is exactly one revocation path and no server-side session state.",
+    "problem": "Shipping /view/<VIEW_TOKEN> made the credential the user's problem. It is 43 characters, Cloudflare stores secrets write-only so it cannot be read back, and losing the clipboard meant re-running setup and invalidating the URL. For a page whose entire purpose is a ten-second glance on a phone, the handling cost exceeded the value of the thing being protected. The user's verdict was direct: it should be install-once, no keys, no passwords, nothing to remember.",
+    "why_chosen": "Enrol-then-cookie moves the credential from the person to the device, which is what devices are for, without inventing an identity system. Reusing VIEW_TOKEN as the cookie value rather than minting a session id is the key property: revocation stays exactly one action (rotate the secret) and takes effect on the next request for every device at once. A session table would have created a second revocation path, and the one that gets forgotten is the one that stays valid. It also means no D1 writes, no expiry bookkeeping, and no state that can drift from the secret it represents. The PWA manifest points start_url and scope at the tokenless /view, so the installed icon is not a bookmark to a secret.",
+    "what_we_tried": "First recommendation was OAuth (sign in with GitHub), and it was wrong: it requires the operator to register an OAuth app and configure a client id and client secret, which is more key handling, not less. It solves sharing with other people, which was not the problem. Cloudflare Access was also considered and rejected because it cannot sit in front of a workers.dev hostname without a custom domain. A hand-written QR encoder was written and abandoned after its output decoded to nothing under OpenCV; the qrcode package was then rejected because it pulls sharp and libvips with six high-severity advisories, to print text. qrcode-terminal has zero dependencies and its half-block output was verified scannable by decoding it.",
+    "tradeoffs": "The cookie is a bearer credential with a ten-year lifetime, so a compromised device retains access until the token is rotated -- there is no per-device revocation, by design. Cookie loss (clearing site data) means re-enrolling from the QR or the saved URL. The URL is now stored at .view-url on disk, which is a persistent copy where previously there was none; that is the accepted cost of not requiring a person to hold a secret, and matches what npm, gh, aws and wrangler all do with their own tokens.",
+    "alternatives": [
+      {
+        "option": "GitHub or Google OAuth on the Worker",
+        "reason_rejected": "Requires registering an OAuth app and configuring a client secret, which is more credential handling for the operator, not less. Solves multi-user sharing, which was not the problem."
+      },
+      {
+        "option": "Cloudflare Access in front of the route",
+        "reason_rejected": "Access applications are scoped to a zone you control; a workers.dev hostname is Cloudflare's zone, so this needs a custom domain first."
+      },
+      {
+        "option": "Server-side session table in D1 with its own session ids",
+        "reason_rejected": "Creates a second revocation path that can disagree with the secret, plus expiry bookkeeping and a D1 write on every enrolment, to buy per-device revocation nobody asked for."
+      },
+      {
+        "option": "Keep the token URL and just document bookmarking it",
+        "reason_rejected": "Leaves a live credential in browser history, sync, and every share sheet, and still requires transferring a 43-character secret by hand to reach a phone."
+      }
+    ],
+    "constraints_created": [
+      "The cookie must never be accepted when VIEW_TOKEN is unset or empty; unset means the feature is off and must stay indistinguishable from an undeployed route",
+      "Literal /view asset paths must be routed before the /view/<token> pattern, since icon.png and manifest.webmanifest both match it",
+      "The manifest link must carry crossorigin=use-credentials or the manifest 404s behind the credential and the install prompt silently never appears"
+    ],
+    "related_to": [
+      "dec-002-ca5b",
+      "con-001-7fb5"
+    ],
+    "tags": [
+      "view",
+      "pwa",
+      "auth",
+      "cookie",
+      "mobile",
+      "install",
+      "worker",
+      "ux"
+    ],
+    "retrieval_hints": [
+      "why does the view use a cookie instead of a login",
+      "how do I add another phone without rotating the token",
+      "why is there no session table",
+      "the home screen icon is a screenshot instead of an icon",
+      "manifest returns 404 behind auth",
+      "install once no password"
+    ],
+    "origin": "user",
+    "schema_version": 4,
+    "status": "active",
+    "superseded_by": null,
+    "created_at": "2026-08-06T04:27:31.736534+00:00",
+    "updated_at": "2026-08-06T04:27:31.736534+00:00",
+    "verified_at": "2026-08-06T04:27:31.736534+00:00",
+    "verified_sha": "71015610ee11cdf4f5bc7543ffdd5d0b6f3a442f"
   }
 ]
