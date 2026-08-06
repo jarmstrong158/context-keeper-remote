@@ -10,3 +10,11 @@
 *.cmd  text eol=crlf
 *.bat  text eol=crlf
 *.ps1  text eol=crlf
+
+# The repo stores TypeScript as LF and 20 of 25 tracked .ts files are LF in the
+# working tree, but core.autocrlf=true on Windows expects CRLF there. Git
+# therefore reports five of them as modified forever -- `git diff` returns zero
+# bytes and the blob hashes match, yet `git status` stays dirty, so real
+# uncommitted work hides among files that were never edited. Declaring the
+# convention makes git's expectation match what is actually stored.
+*.ts   text eol=lf

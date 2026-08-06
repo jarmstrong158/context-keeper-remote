@@ -34,5 +34,59 @@
     "created_at": "2026-07-24T21:22:32.548767+00:00",
     "updated_at": "2026-07-24T21:22:32.548767+00:00",
     "verified_at": "2026-07-24T21:22:32.548767+00:00"
+  },
+  {
+    "id": "dec-002-ca5b",
+    "summary": "The remote Worker serves a read-only phone view at GET /view/<VIEW_TOKEN> -- server-rendered HTML, glance-shaped, on a SEPARATE credential from the MCP connector token -- and enriches it with cambium-remote's team/org knowledge counts via an optional CAMBIUM_STATUS_URL, fail-soft. VIEW_TOKEN unset means the route 404s, and each route refuses the other's token.",
+    "problem": "The decision logs were only reachable from a desktop MCP client, and glancing at them on a phone had no path. The data was already remote (D1 holds 34 projects / 414 entries via the mirror), so the gap was presentation, not plumbing. But the obvious implementation -- reuse the connector URL -- is dangerous in a specific way this repo has already measured: AUTH_TOKEN is embedded in the URL and is read/write over every project, and the security section documents connector URLs appearing in ~54 places across 13 local transcripts on ONE machine. A dashboard URL is opened on a phone, where it lands in browser history, tab sync and screenshots, so reusing that token would place a full-write credential exactly where it leaks most, and rotating it to recover would break every claude.ai connector simultaneously.",
+    "why_chosen": "A second, lower-value credential is the whole design. VIEW_TOKEN sits on a GET-only route that issues nothing but SELECTs, so a leaked glance-URL discloses decision summaries rather than write access to 34 projects. The separation is enforced in BOTH directions and tested as such -- /view rejects AUTH_TOKEN and /mcp rejects VIEW_TOKEN -- because a second credential that silently accepts the first is not a second credential. An unset VIEW_TOKEN 404s exactly like any unknown path, so the feature is off until deliberately enabled. Server-rendered rather than a client fetching JSON: the token never reaches JavaScript, there is no CORS surface, and the page works with scripting disabled. One document with inline CSS and zero external references -- on mobile data that is the difference between glanceable and not. Two D1 queries total rather than a fan-out per project. Entry text is arbitrary recorded prose being injected into HTML, so it is escaped and a test proves an <img onerror> summary renders inert. The cambium knowledge panel crosses a NETWORK boundary to a second Worker, so it is treated as an enrichment and never a dependency: bounded at 2.5s, kicked off before the D1 queries so the round trip overlaps rather than adds, and every failure mode (unset secret, timeout, non-200, unexpected shape) degrades to a stated absence rather than a blank space or a hung page. It sends an explicit User-Agent because context-keeper's con-007 records Cloudflare bot rules 403-ing a default client UA -- here that would present as a silently empty panel rather than an error. It shows team and org only: local scope is desktop-only by design AND is the staging area rather than the part that gets read (136 promoted items carry 774 recalls; 229 local ones carry 117), so the page states the absence instead of implying the counts are everything. cambium-remote's status performs no writes and its recall deliberately does not increment recall counters, so glancing from a phone cannot perturb the promotion signals the desktop side reasons about.",
+    "what_we_tried": "Considered putting the view in cambium-remote (it holds team/org knowledge) or building a separate app. Rejected: context-keeper-remote already has the bulk of the data, the auth pattern and the deploy path, so a route here was the smallest thing that could work. Verified the rendered page at 375px in both colour schemes before shipping, via a stub D1 driving renderView outside the Worker -- the workerd test sandbox blocks filesystem writes, so capturing the HTML needed a path that did not go through vitest.",
+    "tradeoffs": "Still a bearer secret in a URL, just a much cheaper one. Cloudflare Access in front of the route would remove the URL-credential class entirely and is free at this scale, but it is dashboard configuration rather than committable code. The feed is capped at 25 entries with no paging and no search -- deliberate for a glance surface, and the wrong shape if it ever becomes a working surface. The knowledge panel shows counts only, not items: cambium-remote's status is a cheap probe while recall would need a query, and a glance surface has nothing to query with. Setup now costs two secrets rather than one, and the second (CAMBIUM_STATUS_URL) embeds cambium-remote's own path token, so this Worker holds a credential for another -- acceptable because both are read-only surfaces of the same operator's data, but it is a real widening of what a compromise of this Worker would expose.",
+    "alternatives": [
+      {
+        "option": "Reuse AUTH_TOKEN for the view",
+        "reason_rejected": "Puts a read/write credential for 34 projects into phone history, tab sync and screenshots -- the exact leak surface this repo already measured at ~54 occurrences. Rotating to recover would break every connector at once."
+      },
+      {
+        "option": "Client-side fetch of the MCP JSON-RPC API",
+        "reason_rejected": "Puts the token in JavaScript, needs CORS on an endpoint that deliberately has none, and breaks with scripting off. Server rendering avoids all three."
+      },
+      {
+        "option": "Publish a static generated page",
+        "reason_rejected": "The content spans private projects, so it could not be public; and a static page is stale the moment it is written, which defeats glancing."
+      },
+      {
+        "option": "Cloudflare Access instead of a token",
+        "reason_rejected": "Strictly better security and free at this scale, but it is dashboard configuration rather than committable code. Worth adding on top of this later."
+      }
+    ],
+    "constraints_created": [
+      "The view route must never fall back to AUTH_TOKEN, and /mcp must never accept VIEW_TOKEN. Tested in both directions.",
+      "Anything rendering recorded entry text into HTML must escape it -- the text is arbitrary prose from many sources."
+    ],
+    "related_to": [
+      "dec-001-b0d4"
+    ],
+    "tags": [
+      "mobile",
+      "view",
+      "auth",
+      "worker",
+      "read-only"
+    ],
+    "retrieval_hints": [
+      "how do I see my decisions on my phone",
+      "what is VIEW_TOKEN",
+      "why two tokens on the worker",
+      "mobile dashboard for context-keeper"
+    ],
+    "origin": "user",
+    "schema_version": 4,
+    "status": "active",
+    "superseded_by": null,
+    "created_at": "2026-08-06T02:52:20.465482+00:00",
+    "updated_at": "2026-08-06T02:59:04.572100+00:00",
+    "verified_at": "2026-08-06T02:59:04.536343+00:00",
+    "verified_sha": "5612a3b7ba7b220e1b0d657b6ca7e8a05e6d079f"
   }
 ]
