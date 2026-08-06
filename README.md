@@ -226,7 +226,34 @@ The panel fails soft. If cambium is slow (10s budget), down, or unwired, the pag
 still renders and says so. Only the Knowledge tab makes that call, so the other
 tabs never pay for it.
 
-### If cambium-remote's own CI deploy is broken
+### Deploy on push, with no API token
+
+`git push` can deploy the Worker directly, using the wrangler login you already
+have — no Cloudflare API token, no GitHub secret, no dashboard:
+
+```bash
+scripts/install-deploy-hook.cmd
+```
+
+It installs a git **pre-push** hook. Deploy first, push second: if the deploy
+fails the push is aborted, so `origin` never receives a commit that could not be
+deployed. That is the inverse of the failure it replaces — cambium-remote's CI
+was accepting every merge and deploying none of them, with `main` drifting ahead
+of the running Worker and nothing to show it.
+
+Main only, skips branch deletes, `git push --no-verify` skips it once, `-Remove`
+uninstalls.
+
+**Why not just fix the CI?** Because that step genuinely cannot be automated.
+GitHub Actions needs `CLOUDFLARE_API_TOKEN`, and minting a Cloudflare API token
+through the API requires an existing token carrying *User API Tokens: Edit*.
+Wrangler's OAuth login does not have it — its 29 scopes are workers/d1/pages/
+queues operations plus `account:read`, with nothing token-management related. **No
+credential on your machine can create that credential.** The paste is Cloudflare's
+permission model, not a gap in the tooling. Deploying locally sidesteps the
+question entirely.
+
+### If you want GitHub Actions CI anyway
 
 `connect-cambium` deploys cambium-remote itself when it finds the status route
 missing, using the wrangler login you already have — so you do **not** need its

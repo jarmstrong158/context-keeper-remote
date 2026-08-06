@@ -13,7 +13,8 @@
     "view": "node scripts/open-view.mjs",
     "make-icon": "node scripts/make-icon.mjs",
     "connect-cambium": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/connect-cambium.ps1",
-    "fix-cambium-ci": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/fix-cambium-ci.ps1"
+    "fix-cambium-ci": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/fix-cambium-ci.ps1",
+    "install-deploy-hook": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-deploy-hook.ps1"
   },
   "contextKeeper": {
     "//": "Public deploy URL, used by scripts/set-view-token.* to build the view link. No wrangler command reports the workers.dev host -- not whoami, deployments list, versions list, or deployments status -- so it has to be written down somewhere. It is not a secret (it is in the README), and it is only ever half of a credential: the token is the other half. Self-hosters: change this to your own subdomain after deploying.",
