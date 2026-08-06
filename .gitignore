@@ -26,3 +26,7 @@ dist/
 
 # Capture file from the setup-script troubleshooting instructions.
 setup-output.txt
+
+# Saved view URL, written by the setup script so nothing has to be remembered.
+# It is a credential. Untracked on purpose.
+.view-url

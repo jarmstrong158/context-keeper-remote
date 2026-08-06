@@ -9,7 +9,9 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "smoke": "node scripts/smoke-test.mjs",
-    "set-view-token": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/set-view-token.ps1"
+    "set-view-token": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/set-view-token.ps1",
+    "view": "node scripts/open-view.mjs",
+    "make-icon": "node scripts/make-icon.mjs"
   },
   "contextKeeper": {
     "//": "Public deploy URL, used by scripts/set-view-token.* to build the view link. No wrangler command reports the workers.dev host -- not whoami, deployments list, versions list, or deployments status -- so it has to be written down somewhere. It is not a secret (it is in the README), and it is only ever half of a credential: the token is the other half. Self-hosters: change this to your own subdomain after deploying.",
@@ -21,6 +23,7 @@
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.18.2",
     "@cloudflare/workers-types": "^5.20260708.1",
+    "qrcode-terminal": "^0.12.0",
     "typescript": "^5.7.0",
     "vitest": "^4.1.10",
     "wrangler": "^4.108.0"
