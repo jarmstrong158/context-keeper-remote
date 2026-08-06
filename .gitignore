@@ -10,3 +10,8 @@ dist/
 # every read, and embeddings.json is a derived cache; neither belongs in git.
 .context/usage.json
 .context/embeddings.json
+
+# Mirror runtime state -- watermark and conflict log, regenerated on every
+# sync. Not memory; tracking them would make every mirrored session a commit.
+.context/.mirror_watermark
+.context/.mirror_conflicts.json

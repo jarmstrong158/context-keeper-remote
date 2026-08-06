@@ -1,0 +1,36 @@
+[
+  {
+    "id": "con-001-7fb5",
+    "rule": "Never set a Worker secret by passing its value as a command argument, by echoing it into a pipe, or by printing it for a human to copy. Generate it in-process and write it to wrangler's STDIN, hand it off via the clipboard, and display only a masked form. Verify by probing the route for a 200, never by rendering the value back.",
+    "reason": "All three obvious ways to set a secret defeat the reason for having a separate credential. A value passed as argv is visible in the process list to every other user on the machine for the lifetime of the call, and lands in shell history. An echoed value lands in shell history too. A printed value lands in terminal scrollback, in any screen-share or screenshot, and in the transcript of any coding agent that ran the command. That last route is measured, not theoretical: this project's own README documents connector URLs found in ~54 occurrences across 13 local session transcripts on a single machine, none pasted deliberately. VIEW_TOKEN exists precisely so a read-only viewer is not also a write credential; leaking it during setup gives back the separation the design bought.",
+    "triggering_incident": "PR #7 shipped the /view route but left setting VIEW_TOKEN as a manual step. The first instinct was to generate the token in the assistant's session and run wrangler directly, which would have written the value into the session transcript -- the exact leak channel the README already quantifies. scripts/set-view-token.ps1 moved generation onto the operator's machine at run time, so no participant in the conversation ever observes the value, and the script still cannot be run by an agent without reintroducing the leak.",
+    "enforced_by": "",
+    "scope": "scripts/",
+    "hardness": "absolute",
+    "related_to": [
+      "dec-002-ca5b"
+    ],
+    "tags": [
+      "security",
+      "secrets",
+      "wrangler",
+      "view-token",
+      "setup",
+      "tooling"
+    ],
+    "retrieval_hints": [
+      "how do I set VIEW_TOKEN without leaking it",
+      "why does the setup script not print the token",
+      "secret ended up in shell history or the process list",
+      "can the agent set the Cloudflare secret for me",
+      "rotate the phone view URL"
+    ],
+    "origin": "agent",
+    "schema_version": 4,
+    "status": "active",
+    "created_at": "2026-08-06T03:14:30.269699+00:00",
+    "updated_at": "2026-08-06T03:14:47.402326+00:00",
+    "verified_at": "2026-08-06T03:14:47.371262+00:00",
+    "verified_sha": "ba96140894876b64ef4bd2f8add3bc8cb7a2e894"
+  }
+]
