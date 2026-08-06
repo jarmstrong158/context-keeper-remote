@@ -170,5 +170,44 @@
     "updated_at": "2026-08-06T12:40:56.168145+00:00",
     "verified_at": "2026-08-06T12:40:56.168145+00:00",
     "verified_sha": "d9e1389281e625aab69364b8f2577cf7eda63628"
+  },
+  {
+    "id": "con-006-f0f1",
+    "rule": "Never verify a Cloudflare secret immediately after setting it. `wrangler secret put` creates a new Worker version and rolls it out, so for up to a minute some edges still serve the previous version holding the previous value. Poll for at least 60 seconds, and never let the failure message assert a single cause.",
+    "reason": "A secret change is a deployment, not a database write. Until the new version reaches a given edge, requests there authenticate against the OLD secret, so a correct new token legitimately returns 404 for a while. A short verification window therefore reports a wrong-credential failure for a credential that is correct, and the natural next step -- redeploying, regenerating, or blaming the route -- chases a problem that does not exist. The message matters as much as the timeout: asserting one cause (\"it has not been deployed\") is confidently wrong half the time, and a wrong diagnosis printed by the tool itself is followed for far longer than no diagnosis at all.",
+    "triggering_incident": "connect-cambium.ps1 installed STATUS_TOKEN on cambium-remote and polled the status route six times over 18 seconds. All six returned 404 and it refused to wire the consumer, printing \"it has not been redeployed since the /status route was added\". That was true on the first run and false on the second, after the deploy had already been fixed -- so the second failure sent the diagnosis back to a solved problem. wrangler tail proved the route was live and correct on the deployed version, logging route \"/status/***\" and surface \"status\"; the 404s were the previous version still serving during rollout. An earlier tail run that captured nothing looked like proof the route was absent, and was only tail not having finished connecting before the request went out.",
+    "enforced_by": "scripts/connect-cambium.ps1 -- the verification loop must allow at least 60s and its failure text must list causes in likelihood order, not assert one",
+    "scope": "scripts/",
+    "hardness": "absolute",
+    "related_to": [
+      "con-005-d300",
+      "dec-004-8f6b",
+      "con-001-7fb5",
+      "con-002-b4cc",
+      "con-004-69f4"
+    ],
+    "tags": [
+      "cloudflare",
+      "wrangler",
+      "secrets",
+      "propagation",
+      "gotcha",
+      "scripts",
+      "verification"
+    ],
+    "retrieval_hints": [
+      "correct token returns 404 right after setting it",
+      "wrangler secret put then immediately fails",
+      "how long does a cloudflare secret take to apply",
+      "status route 404s after installing the token",
+      "secret change creates a new worker version"
+    ],
+    "origin": "agent",
+    "schema_version": 4,
+    "status": "active",
+    "created_at": "2026-08-06T12:53:27.167299+00:00",
+    "updated_at": "2026-08-06T12:53:36.693833+00:00",
+    "verified_at": "2026-08-06T12:53:36.660301+00:00",
+    "verified_sha": "0fc92d509c110452e1ab0ee1af1b7aafb846003b"
   }
 ]
