@@ -98,18 +98,28 @@ Say "Find it in claude.ai -> Settings -> Connectors -> cambium-remote."
 Say "It will not be shown as you type."
 Write-Host ""
 
-if (-not [Environment]::UserInteractive) {
-    Fail "This needs an interactive session to read the URL without echoing it. Run it from a terminal."
-}
-
-# -AsSecureString so it never renders and never reaches console history. The
-# plaintext exists only inside this process, is used twice, and is zeroed after.
-$secure = Read-Host "  URL" -AsSecureString
-$bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
-try {
-    $url = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
-} finally {
-    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+# [Console]::IsInputRedirected, NOT [Environment]::UserInteractive.
+# UserInteractive reports whether the process has a window station, which is
+# True even when stdin is a pipe or /dev/null -- so guarding on it means the
+# guard never fires and Read-Host blocks forever instead of failing. A script
+# that hangs with no output is worse than one that errors, because there is
+# nothing to read and nothing to report.
+if ([Console]::IsInputRedirected) {
+    # Piped in: read one line. This keeps the script usable from automation and,
+    # just as importantly, makes it testable at all -- the interactive path
+    # cannot be exercised without a human, which is how it shipped broken.
+    Say "(reading the URL from stdin)"
+    $url = [Console]::In.ReadLine()
+} else {
+    # -AsSecureString so it never renders and never reaches console history. The
+    # plaintext exists only inside this process and is dropped after use.
+    $secure = Read-Host "  URL" -AsSecureString
+    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+    try {
+        $url = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+    } finally {
+        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+    }
 }
 # [string] cast rather than ?? -- null-coalescing is PowerShell 7 only and is a
 # parse error on the 5.1 that ships with Windows. Same family as con-004: the

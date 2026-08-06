@@ -130,6 +130,107 @@
           "context-keeper-remote"
         ]
       }
+    },
+    {
+      "id": "k-bc08e2f6",
+      "type": "memory",
+      "kind": "decision",
+      "content": "The view is enrolled once by token URL and used thereafter by a long-lived HttpOnly cookie, installed as a PWA. The cookie carries the same VIEW_TOKEN and is compared the same way, so there is exactly one revocation path and no server-side session state.",
+      "why": "Enrol-then-cookie moves the credential from the person to the device, which is what devices are for, without inventing an identity system. Reusing VIEW_TOKEN as the cookie value rather than minting a session id is the key property: revocation stays exactly one action (rotate the secret) and takes effect on the next request for every device at once. A session table would have created a second revocation path, and the one that gets forgotten is the one that stays valid. It also means no D1 writes, no expiry bookkeeping, and no state that can drift from the secret it represents. The PWA manifest points start_url and scope at the tokenless /view, so the installed icon is not a bookmark to a secret.  Problem: Shipping /view/<VIEW_TOKEN> made the credential the user's problem. It is 43 characters, Cloudflare stores secrets write-only so it cannot be read back, and losing the clipboard meant re-running setup and invalidating the URL. For a page whose entire purpose is a ten-second glance on a phone, the handling cost exceeded the value of the thing being protected. The user's verdict was direct: it should be install-once, no keys, no passwords, nothing to remember.",
+      "tags": [
+        "view",
+        "pwa",
+        "auth",
+        "cookie",
+        "mobile",
+        "install",
+        "worker",
+        "ux",
+        "context-keeper"
+      ],
+      "scope": "local",
+      "project": "context-keeper-remote",
+      "source": {
+        "system": "context-keeper",
+        "ref": "dec-003-0a24"
+      },
+      "created_by": "jonny-desktop",
+      "created_at": "2026-08-06T11:02:59.913775+00:00",
+      "updated_at": "2026-08-06T11:02:59.913775+00:00",
+      "status": "active",
+      "trust": {
+        "recalls": 0,
+        "endorsements": [],
+        "projects": [
+          "context-keeper-remote"
+        ]
+      }
+    },
+    {
+      "id": "k-db44fc11",
+      "type": "memory",
+      "kind": "constraint",
+      "content": "A runnable command handed to someone must assume nothing about their shell or their working directory. Use forward slashes even on Windows, and either an absolute path or an explicit cd -- never a bare npm run, and never a backslash path.",
+      "why": "Two failure modes, and both look like a broken program rather than a bad instruction. (1) Backslash is an escape character in bash -- Git Bash, WSL, and the shell behind most run-this buttons -- so scripts\\set-view-token.cmd collapses to scriptsset-view-token.cmd and reports command not found, naming a file nobody wrote. (2) npm run requires the repo as cwd; from one directory up it emits npm error enoent Could not read package.json, which PowerShell then wraps in a NativeCommandError whose first line is 'At line:1 char:1'. That header mentions no directory and no package.json, so it reads as the script having crashed. In both cases the program never executes, so there is no output and no log, and every diagnostic that assumes it ran is chasing nothing.",
+      "tags": [
+        "docs",
+        "windows",
+        "bash",
+        "cross-shell",
+        "gotcha",
+        "onboarding",
+        "context-keeper"
+      ],
+      "scope": "local",
+      "project": "context-keeper-remote",
+      "source": {
+        "system": "context-keeper",
+        "ref": "con-003-163b"
+      },
+      "created_by": "jonny-desktop",
+      "created_at": "2026-08-06T11:02:59.913775+00:00",
+      "updated_at": "2026-08-06T11:02:59.913775+00:00",
+      "status": "active",
+      "trust": {
+        "recalls": 0,
+        "endorsements": [],
+        "projects": [
+          "context-keeper-remote"
+        ]
+      }
+    },
+    {
+      "id": "k-489a090b",
+      "type": "memory",
+      "kind": "constraint",
+      "content": "Never test a PowerShell Read-Host result directly against -match or -notmatch. Cast to [string] first, and refuse the destructive path outright when [Environment]::UserInteractive is false. A confirmation must fail closed.",
+      "why": "Read-Host returns $null at EOF, which is every piped, redirected, scheduled, or otherwise non-interactive run. In PowerShell $null -notmatch 'pattern' evaluates to EMPTY rather than $true, so the natural guard if ($answer -notmatch '^[Yy]') { cancel } is falsy on $null and execution falls straight through into the action it was meant to gate. The prompt therefore defaults to yes precisely when no human is present to have said it. Casting to [string] turns $null into the empty string, which the regex correctly fails to match; the UserInteractive check is the belt to that, so the destructive path is unreachable without an explicit flag.",
+      "tags": [
+        "powershell",
+        "scripts",
+        "safety",
+        "fail-closed",
+        "gotcha",
+        "windows",
+        "context-keeper"
+      ],
+      "scope": "local",
+      "project": "context-keeper-remote",
+      "source": {
+        "system": "context-keeper",
+        "ref": "con-004-69f4"
+      },
+      "created_by": "jonny-desktop",
+      "created_at": "2026-08-06T11:02:59.913775+00:00",
+      "updated_at": "2026-08-06T11:02:59.913775+00:00",
+      "status": "active",
+      "trust": {
+        "recalls": 0,
+        "endorsements": [],
+        "projects": [
+          "context-keeper-remote"
+        ]
+      }
     }
   ],
   "imported": {
@@ -137,7 +238,10 @@
       "dec-001-b0d4",
       "dec-002-ca5b",
       "con-001-7fb5",
-      "con-002-b4cc"
+      "con-002-b4cc",
+      "dec-003-0a24",
+      "con-003-163b",
+      "con-004-69f4"
     ],
     "agentsync": [],
     "agentsync_last": {},

@@ -258,9 +258,13 @@ if ($secrets.Output -match '"name"\s*:\s*"VIEW_TOKEN"' -and -not $Yes) {
     # into the replace: a confirmation prompt that defaults to DESTROY whenever
     # no human is present. Casting to [string] turns $null into "", which the
     # regex then correctly fails to match.
-    if (-not [Environment]::UserInteractive) {
+    # [Console]::IsInputRedirected, NOT [Environment]::UserInteractive.
+    # UserInteractive reports whether the process has a window station and is
+    # True even when stdin is a pipe or NUL, so guarding on it means the guard
+    # never fires. This one was only ever saved by the [string] cast below.
+    if ([Console]::IsInputRedirected) {
         Write-Host ""
-        Fail "A VIEW_TOKEN already exists and this is a non-interactive run, so there is nobody to confirm with. Re-run with -Yes to replace it deliberately. Nothing was changed."
+        Fail "A VIEW_TOKEN already exists and nothing is attached to answer the prompt, so this would have replaced it silently. Re-run with -Yes to replace it deliberately. Nothing was changed."
     }
     $go = ""
     try { $go = [string](Read-Host "  Replace it? [y/N]") } catch { $go = "" }

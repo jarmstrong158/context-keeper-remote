@@ -135,17 +135,19 @@ unavailable rather than erroring or hanging.
 
 ### Setting `VIEW_TOKEN`
 
-**From inside a clone of this repo:**
+**Double-click `scripts/set-view-token.cmd`.** That is the whole procedure, and it
+works from anywhere because the script relocates itself.
 
-```bash
-npm run set-view-token
-```
-
-**From anywhere at all** — the script relocates itself, so cwd doesn't matter:
+From a terminal, use the absolute path — **not** `npm run`:
 
 ```bash
 powershell -NoProfile -ExecutionPolicy Bypass -File "/full/path/to/context-keeper-remote/scripts/set-view-token.ps1"
 ```
+
+`npm run` needs the repo to be your current directory. From anywhere else it
+fails with `npm error enoent Could not read package.json` — an error that names
+neither the script nor the directory, so it reads as the tool being broken when
+in fact nothing ran at all.
 
 Two things about how that command is written, both of which cost real debugging
 time here:
@@ -168,7 +170,7 @@ Add `-- -DryRun` to run everything except the install, which is the fastest way 
 confirm your environment is set up before touching anything:
 
 ```bash
-npm run set-view-token -- -DryRun
+powershell -NoProfile -ExecutionPolicy Bypass -File "/full/path/to/context-keeper-remote/scripts/set-view-token.ps1" -DryRun
 ```
 
 One run generates the token, installs it, waits for the route to answer `200`, puts
