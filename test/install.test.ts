@@ -135,7 +135,14 @@ describe("installable assets", () => {
     expect(csp).toContain("manifest-src 'self'");
     expect(csp).toContain("default-src 'none'");
     expect(csp).toContain("frame-ancestors 'none'");
-    expect(csp).not.toContain("script-src");
+    // script-src 'self' is required for app.js and the service worker. The
+    // assertion that matters is what is still REFUSED: no 'unsafe-inline', so
+    // an inline <script> -- including one a recorded entry smuggled past the
+    // escaper -- cannot execute. An inline allowance is document-wide.
+    expect(csp).toContain("script-src 'self'");
+    expect(csp).toContain("worker-src 'self'");
+    expect(csp).not.toContain("'unsafe-eval'");
+    expect(csp.match(/script-src[^;]*/)?.[0]).not.toContain("unsafe-inline");
   });
 });
 

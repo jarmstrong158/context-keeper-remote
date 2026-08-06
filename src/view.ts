@@ -433,6 +433,12 @@ function shell(
 <link rel="manifest" href="/view/manifest.webmanifest" crossorigin="use-credentials">
 <link rel="apple-touch-icon" href="/view/icon.png">
 <link rel="icon" type="image/png" href="/view/icon.png">
+<!-- Registers the service worker: what makes this work offline and makes a tap
+     instant instead of a ~270ms round trip. Deferred so it never delays first
+     paint -- the page is fully useful before this runs and stays useful if it
+     never does. Its own file rather than inline, so the CSP needs no
+     unsafe-inline, which would apply to the whole document. -->
+<script src="/view/app.js" defer></script>
 <style>
 :root{--bg:#0b0e13;--pan:#12161d;--line:#222934;--ink:#e7edf5;--dim:#8b97a8;
  --dim2:#5f6a7a;--ac:#2dd4bf;--ac2:#7c9cf5;--warn:#f0b429}

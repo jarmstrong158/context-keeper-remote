@@ -530,6 +530,38 @@
           "context-keeper-remote"
         ]
       }
+    },
+    {
+      "id": "k-9c97db0e",
+      "type": "memory",
+      "kind": "constraint",
+      "content": "Never screenshot a real store for a public repo. Render from a committed synthetic dataset, and check the source database for stray projects before capturing.",
+      "why": "A screenshot of the live view publishes project names and decision summaries permanently, and it is the easiest kind of leak to miss because it does not look like data: nobody greps a PNG before pushing, no diff shows its contents, and it survives in git history after the file is deleted. The same repo already had to force-remove a proposal file that carried content from a private project and one with no remote at all. Rendering from a committed seed also makes the images reproducible rather than one-off artifacts, which matters because screenshots go stale silently -- the UI they depict changes and nothing fails.",
+      "tags": [
+        "privacy",
+        "docs",
+        "screenshots",
+        "public-repo",
+        "leak",
+        "context-keeper"
+      ],
+      "scope": "local",
+      "project": "context-keeper-remote",
+      "source": {
+        "system": "context-keeper",
+        "ref": "con-011-190a"
+      },
+      "created_by": "jonny-desktop",
+      "created_at": "2026-08-06T21:31:54.009014+00:00",
+      "updated_at": "2026-08-06T21:31:54.009014+00:00",
+      "status": "active",
+      "trust": {
+        "recalls": 0,
+        "endorsements": [],
+        "projects": [
+          "context-keeper-remote"
+        ]
+      }
     }
   ],
   "imported": {
@@ -549,7 +581,8 @@
       "con-007-1de7",
       "con-008-a0aa",
       "con-009-2f52",
-      "con-010-4839"
+      "con-010-4839",
+      "con-011-190a"
     ],
     "agentsync": [],
     "agentsync_last": {},

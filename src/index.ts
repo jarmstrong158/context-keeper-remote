@@ -17,7 +17,9 @@ import { pathTokenMatches } from "./shared/mcp-core";
 import { ALL_TOOLS } from "./tools";
 import { log } from "./log";
 import { renderView } from "./view";
-import { cookieAuthorised, iconResponse, manifestJson, sessionCookie } from "./install";
+import {
+  appJs, cookieAuthorised, iconResponse, manifestJson, serviceWorkerJs, sessionCookie,
+} from "./install";
 
 const server = new McpServer({ name: "context-keeper-remote", version: "1.0.0" });
 server.registerAll(ALL_TOOLS);
@@ -54,7 +56,20 @@ export default {
     // Order matters: the literal asset paths also match /^\/view\/([^/]+)$/, so
     // they must be handled before that pattern treats "icon.png" as a token and
     // 404s the icon of an app that is otherwise working.
-    if (url.pathname === "/view/icon.png" || url.pathname === "/view/manifest.webmanifest") {
+    // sw.js and app.js join the asset set. The service worker is what makes this
+    // an app rather than a page: without it every tap is a network round trip
+    // and no signal means a blank screen.
+    //
+    // sw.js is served with Cache-Control: no-cache deliberately. The browser
+    // byte-compares the script to decide whether to install an update, and a
+    // cached copy would pin users to whichever version they first received --
+    // the one bug class a service worker cannot recover from on its own.
+    if (
+      url.pathname === "/view/icon.png" ||
+      url.pathname === "/view/manifest.webmanifest" ||
+      url.pathname === "/view/sw.js" ||
+      url.pathname === "/view/app.js"
+    ) {
       log("request", { route: url.pathname, method: request.method });
       // Assets authenticate on the cookie alone. The <link rel="manifest"> in
       // the page carries crossorigin="use-credentials" so the browser sends it.
@@ -65,6 +80,22 @@ export default {
         return new Response("Method Not Allowed", { status: 405, headers: { allow: "GET, HEAD" } });
       }
       if (url.pathname === "/view/icon.png") return iconResponse();
+      if (url.pathname === "/view/sw.js" || url.pathname === "/view/app.js") {
+        const body = url.pathname === "/view/sw.js" ? serviceWorkerJs() : appJs();
+        return new Response(body, {
+          headers: {
+            "content-type": "text/javascript; charset=utf-8",
+            // no-cache, not no-store: the browser may keep a copy but must
+            // revalidate, which is what lets a service worker update at all.
+            "cache-control": "no-cache",
+            // A service worker's scope is capped by the path it is served from
+            // unless this header widens it. Served from /view/, /view is the
+            // natural scope, so this is belt and braces -- but a scope mismatch
+            // fails registration silently, which is the worst way to find out.
+            "service-worker-allowed": "/view",
+          },
+        });
+      }
       return new Response(manifestJson(), {
         headers: {
           "content-type": "application/manifest+json; charset=utf-8",
@@ -121,7 +152,14 @@ export default {
             // form-action 'self' is new: the search box is a GET form posting back
           // to /view. Everything else stays shut -- still no script, no network,
           // no framing.
+          // script-src 'self' is new, for app.js and the service worker.
+          // Deliberately NOT 'unsafe-inline': the registration lives in its own
+          // file precisely so an inline allowance -- which would apply to the
+          // whole document, including anything a recorded entry smuggled past
+          // the escaper -- is never needed. worker-src is required separately;
+          // script-src does not cover service worker registration.
           "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; " +
+            "script-src 'self'; worker-src 'self'; connect-src 'self'; " +
             "manifest-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
         };
         // Re-issued on every enrolling visit, which also refreshes the ten-year

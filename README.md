@@ -176,6 +176,35 @@ copies the URL, opens it in your browser, and prints a **QR code**.
 Add `-DryRun` to run everything except the install, which is the fastest way to
 check your setup before touching anything.
 
+### It works offline, and a tap is instant
+
+A service worker caches every page you open, cache-first with a background
+revalidate. Measured on the live instance:
+
+| | |
+|---|---|
+| served from cache | **1 ms** |
+| forced to the network | 278–383 ms |
+
+So it opens with no signal, and switching tabs is instant rather than a
+round-trip. A decision log is not a live feed — showing yesterday's answer
+immediately and correcting it a moment later beats showing nothing for 300ms,
+and the header carries an "8h ago" stamp so stale data is never presented as
+current.
+
+**Only 200s are cached.** A `404` is what this Worker returns for an
+unauthenticated or rotated credential, and caching one would mean a device that
+rotated its token keeps being told it is signed out — from its own disk, with no
+network involved and no obvious way to clear it. Verified in both directions.
+
+**The token still never reaches JavaScript.** The cookie is `HttpOnly`, so the
+service worker cannot read it; it only issues same-origin requests the browser
+attaches it to. What was given up is "no client-side JS at all", not the
+credential isolation. The CSP gains `script-src 'self'` and deliberately **not**
+`'unsafe-inline'` — the registration lives in its own file so an inline
+allowance, which would apply to the whole document including anything a recorded
+entry smuggled past the escaper, is never needed.
+
 ### How it stays logged in
 
 The token URL is an **enrolment** step, not a daily one. Visiting it sets a

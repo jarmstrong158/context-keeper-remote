@@ -247,8 +247,11 @@ describe("the shell survives on every page", () => {
     const csp = (await get("/view?q=x")).headers.get("content-security-policy") ?? "";
     expect(csp).toContain("form-action 'self'");
     expect(csp).toContain("default-src 'none'");
-    expect(csp).not.toContain("script-src");
     expect(csp).toContain("frame-ancestors 'none'");
+    // Scripts are allowed now (app.js registers the service worker) but only
+    // from 'self'. No inline execution, which is the property that protects
+    // against anything that got through the escaper.
+    expect(csp.match(/script-src[^;]*/)?.[0]).not.toContain("unsafe-inline");
   });
 
   it("still refuses every page without the cookie", async () => {

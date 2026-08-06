@@ -447,13 +447,27 @@ describe("read-only view (/view/:token)", () => {
     expect(res.headers.get("referrer-policy")).toBe("no-referrer");
   });
 
-  it("loads and executes nothing", async () => {
-    // A page rendered from arbitrary recorded prose, opened on a phone: no
-    // scripts, no external fetches, nothing to inject into.
+  it("loads exactly one script, same-origin, and nothing inline", async () => {
+    // This page renders arbitrary recorded prose, so the rule is not "no
+    // scripts" any more -- the service worker registration needs one -- but
+    // "nothing an entry could have written can execute".
+    //
+    // The properties that matter, and why:
+    //   - every <script> has a src, so there is no inline block for injected
+    //     text to land in;
+    //   - every src is a same-origin absolute path, so nothing is fetched from
+    //     a host we do not control;
+    //   - there is exactly one, so a second one appearing is a change somebody
+    //     has to justify rather than something that slips in.
     const body = await (await getView()).text();
-    expect(body).not.toContain("<script");
+    const tags = body.match(/<script[^>]*>/g) ?? [];
+    expect(tags).toHaveLength(1);
+    expect(tags[0]).toMatch(/src="\/view\/app\.js"/);
+    // Nothing between the tags: no inline block for injected text to land in.
+    expect(body).not.toMatch(/<script[^>]*>[^<]/);
+    // Nothing fetched from a host we do not control.
     expect(body).not.toContain("http://");
-    expect(body).not.toMatch(/src\s*=/);
+    expect(body).not.toMatch(/(?:src|href)\s*=\s*"https?:/);
   });
 
   it("escapes entry text rather than rendering it", async () => {
