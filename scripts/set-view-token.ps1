@@ -92,8 +92,66 @@ try {
         [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 } catch { }
 
-function Fail($msg) { Write-Host "`n  ERROR: $msg`n" -ForegroundColor Red; exit 1 }
+# --- run log --------------------------------------------------------------
+# Every run records itself. A double-clicked console can close on you, scroll
+# past the useful part, or show a PowerShell error whose top line is the least
+# informative part of it -- so "what did it say?" is a bad question to have to
+# ask someone. The log answers it without anyone copying anything.
+#
+# It is scrubbed before it is left on disk: the token and the full view URL are
+# replaced with the mask, so the log is safe to read, paste, and attach even
+# though the run that produced it handled a credential.
+$script:LogPath   = Join-Path $repo ".view-setup.log"
+$script:LogOn     = $false
+$script:TokenSeen = $null
+$script:MaskSeen  = $null
+try { Start-Transcript -Path $script:LogPath -Force | Out-Null; $script:LogOn = $true } catch { }
+
+function Stop-Log {
+    if ($script:LogOn) {
+        try { Stop-Transcript | Out-Null } catch { }
+        $script:LogOn = $false
+    }
+    if ($script:TokenSeen -and (Test-Path $script:LogPath)) {
+        try {
+            $raw = Get-Content $script:LogPath -Raw
+            $raw = $raw.Replace($script:TokenSeen, $script:MaskSeen)
+            Set-Content -Path $script:LogPath -Value $raw -Encoding UTF8
+        } catch { }
+    }
+}
+
+function Fail($msg) {
+    Write-Host "`n  ERROR: $msg`n" -ForegroundColor Red
+    Stop-Log
+    if (Test-Path $script:LogPath) {
+        Write-Host "  A full log of this run is at:" -ForegroundColor DarkGray
+        Write-Host "    $script:LogPath" -ForegroundColor DarkGray
+        Write-Host "  It has the token masked out, so it is safe to share." -ForegroundColor DarkGray
+        Write-Host ""
+    }
+    exit 1
+}
 function Say($msg)  { Write-Host "  $msg" }
+
+# An unhandled terminating error would otherwise leave the transcript running
+# and the token unscrubbed in it. This also turns PowerShell's default error
+# dump -- whose "At line:N char:N" header is the least informative part of it --
+# into something that names the failing line.
+trap {
+    Write-Host "`n  UNHANDLED ERROR" -ForegroundColor Red
+    Write-Host "    $($_.Exception.GetType().Name): $($_.Exception.Message)" -ForegroundColor Red
+    if ($_.InvocationInfo) {
+        Write-Host "    at script line $($_.InvocationInfo.ScriptLineNumber): $($_.InvocationInfo.Line.Trim())" -ForegroundColor Red
+    }
+    Stop-Log
+    if (Test-Path $script:LogPath) {
+        Write-Host "`n  Full log (token masked, safe to share):" -ForegroundColor DarkGray
+        Write-Host "    $script:LogPath" -ForegroundColor DarkGray
+    }
+    Write-Host ""
+    exit 1
+}
 
 function Invoke-Wrangler {
     <#
@@ -130,6 +188,9 @@ function Invoke-Wrangler {
 Write-Host ""
 Write-Host "  context-keeper-remote : view token setup" -ForegroundColor Cyan
 Write-Host "  ----------------------------------------"
+# Into the log, so it explains the environment without anyone being asked to
+# describe it. DarkGray keeps it out of the way on screen.
+Write-Host "  [PS $($PSVersionTable.PSVersion) $($PSVersionTable.PSEdition) | $([Environment]::OSVersion.VersionString) | $repo]" -ForegroundColor DarkGray
 
 $envArgs = @()
 if ($WranglerEnv) { $envArgs = @("--env", $WranglerEnv) }
@@ -204,6 +265,10 @@ $rng.Dispose()
 # base64url, so the value is safe as a path segment without escaping.
 $token = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
 $mask  = $token.Substring(0, 4) + ("." * 12) + $token.Substring($token.Length - 4)
+# Registered with the logger the instant it exists, so that if anything from
+# here on dies and dumps state into the transcript, the scrub still catches it.
+$script:TokenSeen = $token
+$script:MaskSeen  = $mask
 
 # --- 5. install -----------------------------------------------------------
 if ($DryRun) {
@@ -213,6 +278,8 @@ if ($DryRun) {
     Write-Host ""
     Write-Host "  dry run complete -- every step before the install succeeded." -ForegroundColor Green
     Say "Nothing was installed and nothing was probed."
+    Stop-Log
+    Say "log: $script:LogPath"
     Write-Host ""
     exit 0
 }
@@ -297,4 +364,5 @@ Say "Save it in your password manager. Cloudflare stores secrets write-only --"
 Say "there is no reading one back, only replacing it."
 Say "It is read-only and can never write to a store, but anyone holding it can"
 Say "read every decision summary on this instance. Treat it like a password."
+Stop-Log
 Write-Host ""

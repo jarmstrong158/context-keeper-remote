@@ -19,3 +19,7 @@ dist/
 # Written only by scripts/set-view-token.sh when no clipboard tool exists.
 # Contains the full view URL, which is a credential. Delete it once saved.
 .view-url
+
+# Run log from scripts/set-view-token.ps1. The token is scrubbed out before
+# the file is left on disk, but it still records your environment -- untracked.
+.view-setup.log
