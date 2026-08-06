@@ -10,6 +10,10 @@ declare namespace Cloudflare {
     DB: D1Database;
     // Secret-path auth token. Set in the Cloudflare dashboard, never in source.
     AUTH_TOKEN?: string;
+    // Separate secret for the read-only /view/<token> HTML render. Distinct
+    // from AUTH_TOKEN on purpose: the view URL gets opened on a phone, where a
+    // read/write credential does not belong. Unset => the route 404s.
+    VIEW_TOKEN?: string;
   }
 }
 

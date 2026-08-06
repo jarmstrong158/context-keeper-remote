@@ -16,6 +16,7 @@ import { McpServer, createMcpHandler, type ToolContext } from "./mcp";
 import { pathTokenMatches } from "./shared/mcp-core";
 import { ALL_TOOLS } from "./tools";
 import { log } from "./log";
+import { renderView } from "./view";
 
 const server = new McpServer({ name: "context-keeper-remote", version: "1.0.0" });
 server.registerAll(ALL_TOOLS);
@@ -38,6 +39,48 @@ export default {
     const url = new URL(request.url);
     // Expect exactly /mcp/<token>. Extra path segments are rejected.
     const match = /^\/mcp\/([^/]+)\/?$/.exec(url.pathname);
+    // ...and exactly /view/<token>, a read-only HTML render on its OWN secret.
+    // Separate credential by design: this URL gets opened on a phone, and the
+    // connector token is read/write over every project (see src/view.ts).
+    const view = /^\/view\/([^/]+)\/?$/.exec(url.pathname);
+
+    if (view) {
+      log("request", { route: "/view/***", method: request.method });
+      // VIEW_TOKEN unset => the feature is off => indistinguishable from any
+      // other unknown path. Never falls back to AUTH_TOKEN: a second credential
+      // that silently accepts the first is not a second credential.
+      const viewOk = await pathTokenMatches(view[1], env.VIEW_TOKEN);
+      log("auth", { ok: viewOk, surface: "view" });
+      if (!viewOk) return notFound();
+      if (request.method !== "GET" && request.method !== "HEAD") {
+        return new Response("Method Not Allowed", {
+          status: 405,
+          headers: { allow: "GET, HEAD" },
+        });
+      }
+      try {
+        await runMigrations(env.DB);
+        const html = await renderView(env.DB);
+        return new Response(request.method === "HEAD" ? null : html, {
+          headers: {
+            "content-type": "text/html; charset=utf-8",
+            // Behind a secret: never store it, never let a shared cache hold it.
+            "cache-control": "private, no-store",
+            "referrer-policy": "no-referrer",
+            "x-robots-tag": "noindex, nofollow",
+            // Nothing here loads or executes anything; say so.
+            "content-security-policy":
+              "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'",
+          },
+        });
+      } catch (err) {
+        log("error", {
+          surface: "view",
+          message: err instanceof Error ? err.message : String(err),
+        });
+        return new Response("view unavailable", { status: 500 });
+      }
+    }
 
     // The path token is the credential -> log the route with it redacted.
     log("request", {
