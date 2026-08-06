@@ -27,7 +27,10 @@
 // inline CSS -- on a phone, on mobile data, that is the difference between
 // glanceable and not.
 
-import { type Entry, hydrate, type EntryRow } from "./db";
+import { hydrate, type EntryRow } from "./db";
+import {
+  ago, entryDetail, entryRow, loadEntry, loadProject, PAGE_SIZE, search,
+} from "./detail";
 
 // How long the page will wait on cambium-remote before rendering without it.
 // A phone on mobile data must not hang because a SECOND service is slow: the
@@ -96,7 +99,6 @@ async function fetchKnowledge(url: string | undefined): Promise<KnowledgeSummary
 }
 
 const MAX_FEED = 25;
-const SUMMARY_CHARS = 180;
 
 function esc(s: unknown): string {
   return String(s ?? "").replace(/[&<>"']/g, (c) =>
@@ -104,28 +106,8 @@ function esc(s: unknown): string {
   );
 }
 
-function label(e: Entry): string {
-  const p = e.payload;
-  const t = String(p.summary || p.rule || p.name || "(untitled)");
-  return t.length > SUMMARY_CHARS ? t.slice(0, SUMMARY_CHARS - 1) + "…" : t;
-}
 
-function ago(iso: string): string {
-  const then = Date.parse(iso || "");
-  if (!Number.isFinite(then)) return "";
-  const mins = Math.max(0, Math.round((Date.now() - then) / 60000));
-  if (mins < 60) return mins + "m";
-  const hrs = Math.round(mins / 60);
-  if (hrs < 24) return hrs + "h";
-  const days = Math.round(hrs / 24);
-  return days < 30 ? days + "d" : Math.round(days / 30) + "mo";
-}
 
-const KIND_CLASS: Record<string, string> = {
-  decision: "d",
-  constraint: "c",
-  pipeline: "p",
-};
 
 interface Rollup {
   project: string;
@@ -136,7 +118,86 @@ interface Rollup {
   updated_at: string | null;
 }
 
+/**
+ * Dispatch on query parameters rather than routes.
+ *
+ * Every page hangs off the same /view path, so they all inherit one cookie
+ * check. A second route would mean a second auth surface to keep in step, and
+ * the one that drifts is the one that quietly stops checking.
+ */
 export async function renderView(
+  db: D1Database,
+  cambiumUrl?: string,
+  params?: URLSearchParams,
+): Promise<string> {
+  const all = params?.get("all") === "1";
+
+  const entryId = params?.get("e");
+  if (entryId) {
+    const found = await loadEntry(db, entryId);
+    if (!found) return shell(`<div class="crumb"><a href="/view">memory</a></div>
+      <div class="note"><b>No entry with that id.</b> It may have been pruned, or
+      the link may be from a different instance.</div>`);
+    return shell(
+      entryDetail(found.entry, found.predecessor, found.successor),
+      { search: "" },
+    );
+  }
+
+  const project = params?.get("p");
+  if (project) {
+    const rows = await loadProject(db, project, all);
+    const grouped = ["decision", "constraint", "pipeline"]
+      .map((kind) => {
+        const of = rows.filter((r) => r.kind === kind);
+        if (!of.length) return "";
+        return `<h2>${kind}s <span class="cnt">${of.length}</span></h2>
+          <ul>${of.map((e) => entryRow(e, false)).join("")}</ul>`;
+      })
+      .join("");
+    return shell(
+      `<div class="crumb"><a href="/view">memory</a> / ${esc(project)}</div>
+       ${grouped || `<div class="note">Nothing recorded for this project${
+         all ? "" : " that is still active"
+       }.</div>`}
+       ${toggleAll(all, `p=${encodeURIComponent(project)}`)}`,
+      { search: "" },
+    );
+  }
+
+  const q = params?.get("q");
+  if (q !== null && q !== undefined) {
+    const term = q.trim();
+    const rows = term ? await search(db, term, all) : [];
+    return shell(
+      `<div class="crumb"><a href="/view">memory</a> / search</div>
+       ${
+         !term
+           ? `<div class="note">Type something to search. It looks inside every
+              field &mdash; including why a decision was made and what was tried
+              first, which is usually where the answer is.</div>`
+           : rows.length
+             ? `<h2>${rows.length}${rows.length === PAGE_SIZE ? "+" : ""} for &ldquo;${esc(
+                 term,
+               )}&rdquo;</h2><ul>${rows.map((e) => entryRow(e)).join("")}</ul>`
+             : `<div class="note"><b>Nothing matched &ldquo;${esc(term)}&rdquo;.</b>
+                ${all ? "" : "Deprecated and superseded entries are hidden &mdash; try including them."}</div>`
+       }
+       ${term ? toggleAll(all, `q=${encodeURIComponent(term)}`) : ""}`,
+      { search: term },
+    );
+  }
+
+  return renderHome(db, cambiumUrl);
+}
+
+function toggleAll(all: boolean, base: string): string {
+  return all
+    ? `<div class="more"><a href="/view?${base}">hide deprecated and superseded</a></div>`
+    : `<div class="more"><a href="/view?${base}&amp;all=1">include deprecated and superseded</a></div>`;
+}
+
+async function renderHome(
   db: D1Database,
   cambiumUrl?: string,
 ): Promise<string> {
@@ -183,24 +244,18 @@ export async function renderView(
   );
   const freshest = projects[0]?.updated_at ?? "";
 
-  const feedHtml = entries
-    .map(
-      (e) => `<li class="e">
-      <div class="m"><span class="k ${KIND_CLASS[e.kind] ?? ""}">${esc(e.kind)}</span>
-        <span class="pj">${esc(e.project)}</span>
-        <span class="ts">${esc(ago(e.updated_at))}</span></div>
-      <div class="t">${esc(label(e))}</div></li>`,
-    )
-    .join("");
+  // Rows are links now. Tapping one opens the rationale, which is the thing
+  // this store exists to hold and the thing the phone previously could not see.
+  const feedHtml = entries.map((e) => entryRow(e)).join("");
 
   const projHtml = projects
     .map(
-      (p) => `<li class="p">
+      (p) => `<li class="p"><a href="/view?p=${encodeURIComponent(p.project)}">
       <span class="pn">${esc(p.project)}</span>
       <span class="pc">${p.decisions}<i>d</i> ${p.constraints}<i>c</i>${
         Number(p.pipelines) ? ` ${p.pipelines}<i>p</i>` : ""
       }</span>
-      <span class="ts">${esc(ago(p.updated_at ?? ""))}</span></li>`,
+      <span class="ts">${esc(ago(p.updated_at ?? ""))}</span></a></li>`,
     )
     .join("");
 
@@ -225,6 +280,55 @@ export async function renderView(
          design, so it never leaves the machine that learned it &mdash; and it is the
          staging area, not the part that gets read. Promoted knowledge is what
          recall actually returns.</div>`;
+
+  return shell(
+    `<h2>Recent</h2>
+  <ul>${feedHtml || '<li class="e"><div class="t">Nothing recorded yet.</div></li>'}</ul>
+
+  <h2>Projects</h2>
+  <ul>${projHtml}</ul>
+
+  ${knowledgeHtml}`,
+    {
+      search: "",
+      header: `<h1>memory<span>${projects.length} projects</span></h1>
+  <div class="tot">
+    <span><b>${totals.dec}</b> decisions</span>
+    <span><b>${totals.con}</b> constraints</span>
+    ${totals.pipe ? `<span><b>${totals.pipe}</b> pipelines</span>` : ""}
+    <span class="ts">${esc(ago(freshest))} ago</span>
+  </div>`,
+    },
+  );
+}
+
+/**
+ * The document around every page.
+ *
+ * Extracted so detail, project and search pages cannot drift from the home
+ * page's head -- and specifically so they cannot lose the manifest link, which
+ * is what makes the thing installable. A page reachable from the home screen
+ * that quietly dropped its own manifest would still work and would stop being
+ * an app.
+ */
+function shell(
+  main: string,
+  opts: { search?: string; header?: string } = {},
+): string {
+  const header =
+    opts.header ??
+    `<h1><a href="/view" class="home">memory</a></h1>`;
+
+  // GET, so a search is a plain URL that can be bookmarked, shared between
+  // devices, and re-run by reloading. No JS involved.
+  const searchBox =
+    opts.search === undefined
+      ? ""
+      : `<form class="sf" method="get" action="/view" role="search">
+           <input type="search" name="q" value="${esc(opts.search)}"
+             placeholder="search every field" autocapitalize="off"
+             autocorrect="off" spellcheck="false" enterkeyhint="search">
+         </form>`;
 
   return `<!doctype html><html lang="en"><head>
 <meta charset="utf-8">
@@ -285,25 +389,71 @@ ul{list-style:none;margin:0;padding:0}
 .note code{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;
  background:var(--bg);padding:1px 5px;border-radius:4px;border:1px solid var(--line)}
 footer{padding:20px 16px 30px;color:var(--dim2);font-size:11.5px;line-height:1.6}
+
+/* --- rows became links; keep them looking like rows --- */
+.e a,.p a{color:inherit;text-decoration:none;display:block}
+.p a{display:flex;align-items:center;gap:10px;width:100%}
+.e{padding:0}
+.e a{padding:11px 16px}
+.p{padding:0}
+.p a{padding:11px 16px}
+.e a:active,.p a:active{background:var(--pan)}
+.e.dead .t{color:var(--dim)}
+.dd{padding:1px 7px;border-radius:20px;border:1px solid var(--line);color:var(--dim2);
+ font-size:10px;text-transform:uppercase;letter-spacing:.04em}
+h2 .cnt{color:var(--dim2);font-weight:400;margin-left:6px}
+
+/* --- search --- */
+.sf{margin-top:10px}
+.sf input{width:100%;padding:9px 12px;border-radius:9px;border:1px solid var(--line);
+ background:var(--pan);color:var(--ink);font-size:16px;-webkit-appearance:none}
+.sf input::placeholder{color:var(--dim2)}
+.sf input:focus{outline:none;border-color:var(--ac)}
+
+/* --- breadcrumb + detail --- */
+.crumb{padding:12px 16px 0;font-size:12px;color:var(--dim2)}
+.crumb a{color:var(--dim);text-decoration:none}
+.home{color:inherit;text-decoration:none}
+.det{padding:10px 16px 30px}
+.det .m{margin:8px 0 6px}
+.dt{font-size:19px;line-height:1.35;margin:0 0 14px;letter-spacing:-.01em;font-weight:620}
+.det section{margin:18px 0}
+.det h3{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--dim2);
+ margin:0 0 5px;font-weight:600}
+.det p{margin:0 0 9px;font-size:14.5px;line-height:1.6;color:var(--ink)}
+.det.dead .dt{color:var(--dim)}
+
+/* --- the supersession trail --- */
+.trail{display:block;padding:10px 12px;margin:0 0 14px;border-radius:9px;
+ border:1px solid var(--line);background:var(--pan);text-decoration:none;
+ color:var(--dim);font-size:13px;line-height:1.45}
+.trail span{display:block;font-size:10.5px;text-transform:uppercase;
+ letter-spacing:.05em;color:var(--dim2);margin-bottom:3px}
+.trail.now{border-color:rgba(240,180,41,.5)}
+.trail.now span{color:var(--warn)}
+
+.metaGrid{display:flex;flex-wrap:wrap;gap:6px 18px;margin:0 0 16px;font-size:12.5px}
+.kv span{color:var(--dim2);margin-right:6px}
+.kv b{font-weight:560;font-family:ui-monospace,Menlo,monospace;font-size:12px}
+.steps,.bul,.alts{margin:0;padding-left:18px;font-size:14px;line-height:1.55}
+.steps li,.bul li{margin-bottom:5px}
+.alts{list-style:none;padding:0}
+.alts li{margin-bottom:9px}
+.alts b{display:block;font-weight:580;font-size:14px}
+.alts span{color:var(--dim);font-size:13.5px;line-height:1.5}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 0}
+.chip{padding:3px 9px;border-radius:20px;border:1px solid var(--line);color:var(--dim);
+ font-size:11.5px;text-decoration:none;font-family:ui-monospace,Menlo,monospace}
+.idline{margin-top:22px;padding-top:12px;border-top:1px solid var(--line);
+ color:var(--dim2);font-size:11px;font-family:ui-monospace,Menlo,monospace}
+.more{padding:14px 16px}
+.more a{color:var(--dim);font-size:12.5px}
 </style></head><body>
 <header>
-  <h1>memory<span>${projects.length} projects</span></h1>
-  <div class="tot">
-    <span><b>${totals.dec}</b> decisions</span>
-    <span><b>${totals.con}</b> constraints</span>
-    ${totals.pipe ? `<span><b>${totals.pipe}</b> pipelines</span>` : ""}
-    <span class="ts">${esc(ago(freshest))} ago</span>
-  </div>
+  ${header}
+  ${searchBox}
 </header>
-<main>
-  <h2>Recent</h2>
-  <ul>${feedHtml || '<li class="e"><div class="t">Nothing recorded yet.</div></li>'}</ul>
-
-  <h2>Projects</h2>
-  <ul>${projHtml}</ul>
-
-  ${knowledgeHtml}
-</main>
+<main>${main}</main>
 <footer>
   Read-only view. This URL is a credential &mdash; it is not indexed, but anyone
   holding it can read every summary above.<br>
