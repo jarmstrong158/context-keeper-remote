@@ -313,5 +313,59 @@
     "updated_at": "2026-08-06T14:46:51.391558+00:00",
     "verified_at": "2026-08-06T14:46:51.391558+00:00",
     "verified_sha": "39df5f33f02bb29eabea892b0ff8ace851378312"
+  },
+  {
+    "id": "dec-007-cae9",
+    "summary": "The view becomes an offline-capable app via a service worker: cache-first with background revalidate, only 200s cached. Measured 1ms from cache against 278-383ms from the network. This trades away dec-002's \"no client-side JS at all\" but keeps the credential isolation that property was actually protecting.",
+    "problem": "The operator's verdict was \"this whole thing we made is still just html, I want an app\". The substance of that was measurable rather than aesthetic: every tap was a ~270ms round trip and no signal meant a blank screen. That is the real gap between this and a native client, far more than what renders the pixels. The alternatives were a Capacitor wrapper (a store bundle around the same HTML, which does not answer the objection) or a true native client (needs a JSON API the Worker does not have, plus store accounts and a second codebase).",
+    "why_chosen": "A service worker closes the actual gap for a fraction of the cost of going native, and keeps one codebase. Cache-first rather than network-first because a decision log is not a live feed: showing yesterday's answer instantly and correcting it a moment later beats showing nothing for 300ms, and the header already carries a freshness stamp so stale data is never silently presented as current. Network-first would have discarded the whole benefit on exactly the connection where it matters. Crucially the credential property survives: the cookie is HttpOnly, so the worker cannot read the token and only issues same-origin requests the browser attaches it to. What dec-002 gives up is \"no JS at all\", not the isolation that mattered.",
+    "what_we_tried": "The PWA manifest and enrolment cookie from dec-003 already made it installable, and it was assumed that was enough to feel like an app. It was not, and the reason only became clear once the round-trip cost was measured rather than described. A native rebuild was priced and rejected as mostly ceremony for a single-user read-only dashboard.",
+    "tradeoffs": "JavaScript now runs on the page for the first time, so the CSP grows script-src 'self' and worker-src 'self'; 'unsafe-inline' is deliberately still refused, which is why the registration lives in its own file rather than an inline block. A stale page can be shown once before the background revalidate lands. The cache version constant must be bumped by hand when the worker logic changes, or old entries outlive the code that wrote them.",
+    "alternatives": [
+      {
+        "option": "Capacitor or similar native wrapper",
+        "reason_rejected": "Produces a real store bundle but the inside is the same HTML, so it hides the objection rather than answering it, and adds an Apple developer account."
+      },
+      {
+        "option": "True native client in React Native or Expo",
+        "reason_rejected": "Requires building a JSON API on a Worker that currently only emits HTML, plus store accounts and a second codebase to keep in step, for a single-user read-only dashboard."
+      },
+      {
+        "option": "Network-first caching",
+        "reason_rejected": "Would still pay the full round trip on every tap, discarding the benefit on precisely the slow connection where offline support matters."
+      }
+    ],
+    "constraints_created": [
+      "Only 200 responses may be cached: a 404 is what this Worker returns for an unauthenticated or rotated credential, and caching one locks a device out from its own disk",
+      "The service worker registration must live in its own file, never inline, so the CSP never needs unsafe-inline"
+    ],
+    "related_to": [
+      "dec-002-ca5b",
+      "dec-003-0a24",
+      "con-010-4839"
+    ],
+    "tags": [
+      "pwa",
+      "offline",
+      "service-worker",
+      "performance",
+      "view",
+      "csp"
+    ],
+    "retrieval_hints": [
+      "why is there a service worker",
+      "make the phone view work offline",
+      "why cache-first and not network-first",
+      "did adding JS break the token isolation",
+      "app feels slow every tap is a round trip"
+    ],
+    "origin": "user",
+    "schema_version": 4,
+    "status": "active",
+    "superseded_by": null,
+    "created_at": "2026-08-06T22:37:18.057610+00:00",
+    "updated_at": "2026-08-06T22:37:18.057610+00:00",
+    "verified_at": "2026-08-06T22:37:18.057610+00:00",
+    "verified_sha": "741764e67461d94c97b6da3e2802c526f50018b3"
   }
 ]
