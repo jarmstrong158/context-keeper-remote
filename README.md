@@ -226,6 +226,32 @@ The panel fails soft. If cambium is slow (10s budget), down, or unwired, the pag
 still renders and says so. Only the Knowledge tab makes that call, so the other
 tabs never pay for it.
 
+### If cambium-remote's own CI deploy is broken
+
+`connect-cambium` deploys cambium-remote itself when it finds the status route
+missing, using the wrangler login you already have — so you do **not** need its
+GitHub Actions deploy working for the Knowledge tab to work.
+
+You only need it if you want cambium-remote to auto-deploy on every push. Its
+workflow needs two Cloudflare secrets, and an empty one fails **silently**: every
+merge looks green and deploys nothing.
+
+```bash
+scripts/fix-cambium-ci.cmd
+```
+
+`CLOUDFLARE_ACCOUNT_ID` is read from `wrangler whoami` and set automatically — it
+is an identifier, not a credential; it is in every dashboard URL.
+
+`CLOUDFLARE_API_TOKEN` you paste once, and that step is genuinely irreducible:
+creating a Cloudflare API token requires an existing token with
+*User API Tokens: Edit*, and wrangler's OAuth login is not one. **No credential on
+your machine can mint that credential.** Everything around it is automated — the
+browser opens on the right page, the token is read without echoing, it is
+**verified against Cloudflare's API before being stored**, both secrets go over
+stdin rather than argv, and the previously failed run is re-triggered so you watch
+it go green instead of taking the script's word for it.
+
 ### Set your Worker URL (self-hosters)
 
 No wrangler command reports the `workers.dev` host — not `whoami`,

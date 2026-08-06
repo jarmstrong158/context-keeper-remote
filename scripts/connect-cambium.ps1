@@ -46,7 +46,12 @@ param(
     # flag, and defaulting both to "production" would have failed at the install
     # step with "No environment found in configuration with name production".
     [string]$CambiumEnv = "",
-    [string]$LocalEnv = "production"
+    [string]$LocalEnv = "production",
+    # Deploying cambium-remote is a side effect on another Worker, so it is
+    # opt-out. It only ever fires when the status route is already failing, and
+    # it deploys that repo's own checked-out main -- never anything of this
+    # repo's.
+    [switch]$SkipDeploy
 )
 
 $cambiumEnvArgs = @(); if ($CambiumEnv) { $cambiumEnvArgs = @("--env", $CambiumEnv) }
@@ -256,16 +261,52 @@ foreach ($attempt in 1..20) {
         $detail = if ($_.Exception.Response) { "HTTP $([int]$_.Exception.Response.StatusCode)" } else { $_.Exception.Message }
     } catch { $detail = $_.Exception.Message }
 }
+# The route is not answering, and the overwhelmingly likely reason is that
+# cambium-remote has not been deployed since /status was added. Rather than
+# printing that as homework, deploy it -- wrangler is already authenticated
+# here, which is how this script has been writing secrets all along.
+#
+# This is the difference between a setup script and a checklist. cambium-remote's
+# GitHub Actions deploy needs CLOUDFLARE_API_TOKEN, which only Cloudflare can
+# mint and only a human can create; if that is unset the workflow fails silently
+# on every merge and the Worker never updates. Deploying from here needs none of
+# that, so the CI gap stops being a prerequisite for this feature working.
+if (-not $ok -and -not $SkipDeploy) {
+    Write-Host ""
+    Say "The status route is not answering ($detail), which almost always means"
+    Say "cambium-remote has not been deployed since /status was added."
+    Write-Host "  deploying cambium-remote..." -NoNewline
+    $dep = Invoke-Wrangler -WranglerArgs @("deploy") -In $CambiumDir
+    if ($dep.Code -ne 0) {
+        Write-Host ""
+        ($dep.Output -split "`r?`n" | Where-Object { $_ -match '\S' } | Select-Object -Last 6) |
+            ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
+        Fail "Could not deploy cambium-remote. CAMBIUM_STATUS_URL was NOT set, so nothing here points at a route that does not work."
+    }
+    Write-Host " ok" -ForegroundColor Green
+
+    Write-Host "  re-checking the status route (up to 60s)" -NoNewline
+    foreach ($attempt in 1..20) {
+        Start-Sleep -Seconds 3
+        Write-Host "." -NoNewline
+        try {
+            $r = Invoke-WebRequest -Uri $statusUrl -Method Get -TimeoutSec 20 -UseBasicParsing `
+                 -Headers @{ "user-agent" = "context-keeper-view/1.0" }
+            if ([int]$r.StatusCode -eq 200 -and $r.Content -match '"counts"') { $ok = $true; break }
+            $detail = "answered $([int]$r.StatusCode) without counts"
+        } catch [System.Net.WebException] {
+            $detail = if ($_.Exception.Response) { "HTTP $([int]$_.Exception.Response.StatusCode)" } else { $_.Exception.Message }
+        } catch { $detail = $_.Exception.Message }
+    }
+    if ($ok) { Write-Host " ok" -ForegroundColor Green }
+}
+
 if (-not $ok) {
     Write-Host ""
-    Say "cambium-remote did not serve the status route after 60s ($detail)."
-    Say ""
-    Say "Two causes, in order of likelihood:"
-    Say "  1. cambium-remote has not been deployed since the /status route was"
-    Say "     added. Check that its Deploy workflow actually SUCCEEDED -- filter"
-    Say "     by workflow name -- gh run list alone returns CI, not Deploy. If"
-    Say "     it failed, deploy from the checkout with: npx wrangler deploy"
-    Say "  2. The rollout is unusually slow. Re-running is safe and cheap."
+    Say "cambium-remote still did not serve the status route ($detail), even after"
+    Say "deploying it. That is unusual. Check the Worker's logs:"
+    Say "    npx wrangler tail        (run it from the cambium-remote checkout)"
+    Say "Zero requests appearing there means the call is not reaching it at all."
     Fail "CAMBIUM_STATUS_URL was NOT set, so nothing here points at a route that does not work."
 }
 Write-Host " ok" -ForegroundColor Green
