@@ -244,5 +244,40 @@
     "updated_at": "2026-08-06T13:12:31.593530+00:00",
     "verified_at": "2026-08-06T13:12:31.593530+00:00",
     "verified_sha": "13c90fb5c9b334b62efb9b62b125aa5397eb266e"
+  },
+  {
+    "id": "con-008-a0aa",
+    "rule": "Nothing that names another Worker, another account, or a pinned resource id may appear in the TOP-LEVEL wrangler.toml. That config is what the Deploy to Cloudflare button runs, in an account that has none of those things. Put it under [env.production], and remember named environments inherit nothing.",
+    "reason": "The top-level profile exists so a stranger's one-click deploy provisions its own resources: the D1 binding deliberately omits database_id for exactly this reason. A service binding is the opposite kind of declaration -- it names a target by name, and Cloudflare rejects the deploy when that Worker does not exist in the deploying account. So a top-level [[services]] breaks the self-host path for everyone except the maintainer, and breaks it at the button, before the deployer has any context for the error. The inheritance direction compounds it: named environments inherit NOTHING, so a binding placed only at the top level is also silently absent from the env CI actually deploys. Both halves have to be got right, and they fail in opposite directions.",
+    "triggering_incident": "The CAMBIUM service binding needed to reach cambium-remote was added to both the top level and [env.production]. It worked for the maintainer and would have failed every one-click self-host deploy, because no other account has a Worker called cambium-remote. It was caught only while writing the README's installation section -- reading the setup back as a stranger is what surfaced it, not any test, since the test suite and the maintainer deploy both pass with the binding present.",
+    "enforced_by": "wrangler.toml -- the top-level profile must declare no [[services]] and no database_id; [env.production] carries both",
+    "scope": "wrangler.toml",
+    "hardness": "absolute",
+    "related_to": [
+      "con-007-1de7",
+      "dec-004-8f6b"
+    ],
+    "tags": [
+      "wrangler",
+      "cloudflare",
+      "self-host",
+      "config",
+      "deploy",
+      "service-binding"
+    ],
+    "retrieval_hints": [
+      "one-click deploy fails for other people",
+      "service binding breaks the deploy button",
+      "where do bindings go in wrangler.toml",
+      "named environment missing a binding",
+      "top-level vs env.production config"
+    ],
+    "origin": "agent",
+    "schema_version": 4,
+    "status": "active",
+    "created_at": "2026-08-06T14:15:32.264579+00:00",
+    "updated_at": "2026-08-06T14:15:32.264579+00:00",
+    "verified_at": "2026-08-06T14:15:32.264579+00:00",
+    "verified_sha": "570b1041a7af35eca09f1e5129f9583ff74d6a18"
   }
 ]
