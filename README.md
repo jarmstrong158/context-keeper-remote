@@ -173,10 +173,34 @@ Verification probes the route for a `200` rather than printing the value back, w
 is why a `404` afterwards is reported as *"redeploy the Worker"* instead of as a bad
 token: the script can prove the secret works without ever seeing it work.
 
-The script targets **Windows PowerShell 5.1**, the version that ships with Windows and
-the one `.cmd` launches. If you edit it, note that `RandomNumberGenerator::Fill` and
-`Invoke-WebRequest -SkipHttpErrorCheck` are PowerShell 7 / .NET Core only and throw
-here — the `RNGCryptoServiceProvider` and `WebException` handling are deliberate.
+**Self-hosters: set your URL once.** No wrangler command reports the `workers.dev`
+host — not `whoami`, `deployments list`, `versions list`, or `deployments status` —
+so it lives in `package.json`:
+
+```bash
+node -e "const p=require('./package.json');p.contextKeeper.workerUrl='https://<worker>.<account>.workers.dev';require('fs').writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
+```
+
+The script reads it **before** installing anything, and refuses to run without it.
+That ordering is deliberate: a token installed without a URL to put it in is
+unrecoverable, since Cloudflare can't read a secret back. Failing before the write
+costs nothing; failing after costs the token.
+
+### Editing the script
+
+It targets **Windows PowerShell 5.1** — the version that ships with Windows and the
+one `.cmd` launches. Three things there are load-bearing and look like they could be
+modernized:
+
+- `RNGCryptoServiceProvider`, not `RandomNumberGenerator::Fill` — the latter doesn't
+  exist on .NET Framework and throws.
+- Manual `WebException` status extraction, not `-SkipHttpErrorCheck` — that parameter
+  is PowerShell 7 only.
+- Every wrangler call goes through `Invoke-Wrangler`. On 5.1, `2>&1` on a *native*
+  command wraps each stderr line in an ErrorRecord, and under
+  `$ErrorActionPreference = 'Stop'` the first one is **terminating** — so an ordinary
+  wrangler notice kills the run. The helper drops to `Continue` for the call and
+  restores it after, which is what turns stderr back into data.
 
 Prefer to do it by hand? `npx wrangler secret put VIEW_TOKEN --env production` prompts
 without echoing; you just generate the value yourself (`openssl rand -base64 32`) and

@@ -4,12 +4,9 @@
   phone view -- without the token being printed, logged, or passed as an argument.
 
 .DESCRIPTION
-  Run it and you are done. On a fresh setup it asks nothing: it generates the
-  token, installs it, waits for the route to answer 200, puts the URL on your
-  clipboard, and opens it in your browser so it lands in history where you can
-  bookmark it or send it to your phone. The only prompt it will ever show is a
-  confirmation when a VIEW_TOKEN already exists, because replacing one silently
-  breaks every URL already in use -- and -Yes skips even that.
+  Run it and you are done. On a fresh setup it asks nothing. The only prompt it
+  can show is a confirmation when a VIEW_TOKEN already exists, because replacing
+  one breaks every URL already in use -- and -Yes skips even that.
 
   The view URL is a credential, and every ordinary way of setting one leaks it:
 
@@ -23,19 +20,34 @@
 
   That last one is measured, not theoretical: this repo's README documents
   connector URLs found in ~54 occurrences across 13 local session transcripts on
-  a single machine, none pasted deliberately. So the token here is generated
+  a single machine, none pasted deliberately. So the token is generated
   in-process, written to wrangler's STDIN (never argv, so it never reaches the
   process list), and displayed only as a mask. It lands in exactly two places:
   Cloudflare, and your clipboard.
 
+  TWO ORDERING RULES, both learned the hard way:
+
+  1. The Worker URL is resolved BEFORE the secret is installed. An installed
+     token you cannot build a URL for is unrecoverable -- Cloudflare stores
+     secrets write-only, so there is no reading it back, and the only fix is to
+     overwrite it. Failing before the write costs nothing; failing after costs
+     the token.
+  2. Every wrangler call goes through Invoke-Wrangler. On PS 5.1, `2>&1` on a
+     native command wraps each stderr line in an ErrorRecord, and with
+     $ErrorActionPreference = 'Stop' the first one is terminating -- so an
+     ordinary wrangler notice would kill the run. See the function comment.
+
   Targets Windows PowerShell 5.1, which is what the .cmd wrapper launches and
   what ships with Windows. RNGCryptoServiceProvider and the WebException status
-  handling below are deliberate 5.1 choices -- RandomNumberGenerator::Fill and
+  handling are deliberate 5.1 choices: RandomNumberGenerator::Fill and
   -SkipHttpErrorCheck are .NET Core / PowerShell 7 only and throw here.
 
 .PARAMETER WranglerEnv
   Wrangler environment. "production" for this repo's Worker (the default); pass
   "" for a self-hosted deploy that uses the top-level config.
+
+.PARAMETER WorkerUrl
+  Override the deploy URL. Normally read from package.json -> contextKeeper.workerUrl.
 
 .PARAMETER Yes
   Skip the replace-confirmation. Rotating invalidates every existing view URL
@@ -58,7 +70,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-Set-Location (Split-Path -Parent $PSScriptRoot)
+$repo = Split-Path -Parent $PSScriptRoot
+Set-Location $repo
 
 # Some 5.1 installs still default to TLS 1.0, which workers.dev refuses. Without
 # this the verification step fails with a connection error that looks like the
@@ -71,6 +84,38 @@ try {
 function Fail($msg) { Write-Host "`n  ERROR: $msg`n" -ForegroundColor Red; exit 1 }
 function Say($msg)  { Write-Host "  $msg" }
 
+function Invoke-Wrangler {
+    <#
+      Every wrangler call goes through here, for one reason: on Windows
+      PowerShell 5.1, `2>&1` on a NATIVE command does not merely merge streams.
+      It wraps each stderr line in an ErrorRecord, and with
+      $ErrorActionPreference = 'Stop' the first such record is a TERMINATING
+      error. wrangler writes routine notices to stderr, so the script would die
+      on a warning -- observed here as an npm "the following package will be
+      installed" notice killing the run before wrangler even started.
+
+      Dropping to 'Continue' for the duration of the call is what turns stderr
+      back into data. The preference is restored in finally, so the rest of the
+      script keeps fail-fast behaviour.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string[]]$WranglerArgs,
+        [string]$StdIn
+    )
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        if ($PSBoundParameters.ContainsKey('StdIn')) {
+            $out = $StdIn | & npx wrangler @WranglerArgs 2>&1 | Out-String
+        } else {
+            $out = & npx wrangler @WranglerArgs 2>&1 | Out-String
+        }
+        return [pscustomobject]@{ Output = $out; Code = $LASTEXITCODE }
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+}
+
 Write-Host ""
 Write-Host "  context-keeper-remote : view token setup" -ForegroundColor Cyan
 Write-Host "  ----------------------------------------"
@@ -78,29 +123,58 @@ Write-Host "  ----------------------------------------"
 $envArgs = @()
 if ($WranglerEnv) { $envArgs = @("--env", $WranglerEnv) }
 
-# --- preflight ------------------------------------------------------------
+# --- 1. resolve the Worker URL, BEFORE anything is installed --------------
+# No wrangler command reports the workers.dev host -- not whoami, deployments
+# list, versions list, or deployments status (all checked). So it is recorded in
+# package.json, where a self-hoster changes it once.
+if (-not $WorkerUrl) {
+    $pkgPath = Join-Path $repo "package.json"
+    if (Test-Path $pkgPath) {
+        try {
+            $pkg = Get-Content $pkgPath -Raw | ConvertFrom-Json
+            if ($pkg.contextKeeper -and $pkg.contextKeeper.workerUrl) {
+                $WorkerUrl = [string]$pkg.contextKeeper.workerUrl
+            }
+        } catch { }
+    }
+}
+if (-not $WorkerUrl -or $WorkerUrl -notmatch '^https://') {
+    Fail @"
+Could not determine the Worker URL, so nothing was installed.
+
+  Set it once in package.json:
+
+      "contextKeeper": { "workerUrl": "https://<worker>.<account>.workers.dev" }
+
+  or pass it directly:
+
+      .\scripts\set-view-token.ps1 -WorkerUrl https://<worker>.<account>.workers.dev
+
+  This is checked first on purpose: a token installed without a URL to put it
+  in is unrecoverable, because Cloudflare cannot read a secret back.
+"@
+}
+$WorkerUrl = $WorkerUrl.TrimEnd('/')
+Say "worker  : $WorkerUrl"
+
+# --- 2. preflight ---------------------------------------------------------
 # Checked separately so an auth problem reports as an auth problem, instead of
 # surfacing later as an opaque "secret put failed".
 if (-not (Get-Command npx -ErrorAction SilentlyContinue)) {
     Fail "npx not found. Install Node 22+ and re-run."
 }
 Write-Host "  checking wrangler..." -NoNewline
-$who = & npx wrangler whoami 2>&1 | Out-String
-if ($LASTEXITCODE -ne 0 -or $who -match "not authenticated|You are not logged in") {
+$who = Invoke-Wrangler -WranglerArgs @("whoami")
+if ($who.Code -ne 0 -or $who.Output -match "not authenticated|You are not logged in") {
     Write-Host ""
     Fail "wrangler is not authenticated. Run 'npx wrangler login' and re-run."
 }
 Write-Host " ok" -ForegroundColor Green
 
-# --- is this a create or a replace? --------------------------------------
+# --- 3. create or replace? ------------------------------------------------
 # Only a replace is destructive, so only a replace is worth stopping for.
-$existing = $false
-try {
-    $list = & npx wrangler secret list @envArgs 2>&1 | Out-String
-    if ($list -match '"?name"?\s*:\s*"VIEW_TOKEN"') { $existing = $true }
-} catch { }
-
-if ($existing -and -not $Yes) {
+$secrets = Invoke-Wrangler -WranglerArgs (@("secret", "list") + $envArgs)
+if ($secrets.Output -match '"name"\s*:\s*"VIEW_TOKEN"' -and -not $Yes) {
     Write-Host ""
     Write-Host "  A VIEW_TOKEN already exists." -ForegroundColor Yellow
     Write-Host "  Replacing it breaks every view URL already in use, immediately."
@@ -109,7 +183,7 @@ if ($existing -and -not $Yes) {
     if ($go -notmatch '^[Yy]') { Write-Host "  cancelled.`n"; exit 0 }
 }
 
-# --- generate -------------------------------------------------------------
+# --- 4. generate ----------------------------------------------------------
 # 32 bytes from the OS CSPRNG. RNGCryptoServiceProvider rather than
 # RandomNumberGenerator::Fill, which does not exist on .NET Framework / PS 5.1.
 $rng = New-Object System.Security.Cryptography.RNGCryptoServiceProvider
@@ -120,38 +194,25 @@ $rng.Dispose()
 $token = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
 $mask  = $token.Substring(0, 4) + ("." * 12) + $token.Substring($token.Length - 4)
 
-# --- install --------------------------------------------------------------
+# --- 5. install -----------------------------------------------------------
 Write-Host "  installing VIEW_TOKEN..." -NoNewline
-$token | & npx wrangler secret put VIEW_TOKEN @envArgs 2>&1 | Out-Null
-if ($LASTEXITCODE -ne 0) {
+$put = Invoke-Wrangler -WranglerArgs (@("secret", "put", "VIEW_TOKEN") + $envArgs) -StdIn $token
+if ($put.Code -ne 0) {
     Write-Host ""
-    Fail "wrangler secret put failed. Run it by hand to see the error:`n         npx wrangler secret put VIEW_TOKEN $($envArgs -join ' ')"
+    Say "wrangler reported:"
+    ($put.Output -split "`r?`n" | Where-Object { $_ -match '\S' } | Select-Object -Last 6) |
+        ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
+    Fail "wrangler secret put failed (exit $($put.Code)). Nothing was changed."
 }
 Write-Host " ok" -ForegroundColor Green
 
-# --- resolve the Worker URL ----------------------------------------------
-if (-not $WorkerUrl) {
-    try {
-        $dep = & npx wrangler deployments list @envArgs 2>&1 | Out-String
-        if ($dep -match '(https://[a-z0-9.\-]+\.workers\.dev)') { $WorkerUrl = $Matches[1] }
-    } catch { }
-}
-if (-not $WorkerUrl) {
-    Write-Host ""
-    Say "The secret is installed, but the Worker URL could not be detected."
-    Say "Re-run with -WorkerUrl https://<your-worker>.workers.dev to get the"
-    Say "full link, or find it in the Cloudflare dashboard. The token cannot be"
-    Say "read back, so re-running is the only way to recover the URL."
-    Write-Host ""
-    exit 1
-}
-$viewUrl = "$($WorkerUrl.TrimEnd('/'))/view/$token"
+$viewUrl = "$WorkerUrl/view/$token"
 
-# --- verify ---------------------------------------------------------------
+# --- 6. verify ------------------------------------------------------------
 # Proves the secret took effect without ever rendering it. Cloudflare needs a
-# moment to propagate a new secret, so this retries rather than judging on one
-# attempt. No -SkipHttpErrorCheck: that is PowerShell 7 only, and on 5.1 a 4xx
-# arrives as a terminating WebException carrying the response.
+# moment to propagate, so this retries rather than judging on one attempt.
+# No -SkipHttpErrorCheck: that is PowerShell 7 only, and on 5.1 a 4xx arrives as
+# a terminating WebException carrying the response.
 Write-Host "  verifying..." -NoNewline
 $code = 0
 foreach ($attempt in 1..8) {
@@ -179,14 +240,14 @@ if ($code -eq 200) {
     Say "The secret is set. Propagation can take a minute; try the URL shortly."
 }
 
-# --- hand it over ---------------------------------------------------------
+# --- 7. hand it over ------------------------------------------------------
 $copied = $false
 try { Set-Clipboard -Value $viewUrl; $copied = $true } catch { }
 
 Write-Host ""
 Write-Host "  done." -ForegroundColor Green
 Say "token : $mask   (32 bytes; never printed in full)"
-Say "url   : $($WorkerUrl.TrimEnd('/'))/view/$mask"
+Say "url   : $WorkerUrl/view/$mask"
 if ($copied) {
     Write-Host "  The full URL is on your clipboard." -ForegroundColor Cyan
 } else {

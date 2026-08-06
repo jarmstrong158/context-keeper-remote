@@ -35,6 +35,33 @@ printf '  ----------------------------------------\n'
 
 command -v npx >/dev/null 2>&1 || { echo "  ERROR: npx not found (need Node 22+)."; exit 1; }
 
+# Resolve the Worker URL FIRST, before anything is installed. An installed token
+# you cannot build a URL for is unrecoverable: Cloudflare stores secrets
+# write-only, so there is no reading it back, and the only fix is to overwrite
+# it. Failing before the write costs nothing; failing after costs the token.
+#
+# No wrangler command reports the workers.dev host -- not whoami, deployments
+# list, versions list, or deployments status (all checked) -- so it lives in
+# package.json, where a self-hoster changes it once.
+WORKER_URL="${CK_WORKER_URL-}"
+if [ -z "$WORKER_URL" ]; then
+  WORKER_URL="$(node -e "try{var p=require('./package.json');process.stdout.write((p.contextKeeper&&p.contextKeeper.workerUrl)||'')}catch(e){}" 2>/dev/null || true)"
+fi
+case "$WORKER_URL" in
+  https://*) ;;
+  *)
+    printf '\n  ERROR: Could not determine the Worker URL, so nothing was installed.\n\n'
+    printf '  Set it once in package.json:\n\n'
+    printf '      "contextKeeper": { "workerUrl": "https://<worker>.<account>.workers.dev" }\n\n'
+    printf '  or pass it directly:\n\n'
+    printf '      CK_WORKER_URL=https://<worker>.<account>.workers.dev scripts/set-view-token.sh\n\n'
+    printf '  This is checked first on purpose: a token installed without a URL to\n'
+    printf '  put it in is unrecoverable, because Cloudflare cannot read a secret back.\n\n'
+    exit 1;;
+esac
+WORKER_URL="${WORKER_URL%/}"
+say "worker  : $WORKER_URL"
+
 # Checked separately so an auth problem reports as an auth problem, rather than
 # surfacing later as an opaque "secret put failed".
 printf '  checking wrangler...'
@@ -66,20 +93,7 @@ if ! printf '%s' "$TOKEN" | npx wrangler secret put VIEW_TOKEN "${ENV_ARGS[@]}" 
 fi
 printf ' ok\n'
 
-WORKER_URL="${CK_WORKER_URL-}"
-if [ -z "$WORKER_URL" ]; then
-  WORKER_URL="$(npx wrangler deployments list "${ENV_ARGS[@]}" 2>/dev/null \
-    | grep -oE 'https://[a-z0-9.-]+\.workers\.dev' | head -1 || true)"
-fi
-if [ -z "$WORKER_URL" ]; then
-  printf '\n'
-  say "The secret is installed, but the Worker URL could not be detected."
-  say "Re-run with CK_WORKER_URL=https://<your-worker>.workers.dev to get the"
-  say "full link. The token cannot be read back, so re-running is the only way"
-  say "to recover the URL."
-  printf '\n'; exit 1
-fi
-VIEW_URL="${WORKER_URL%/}/view/$TOKEN"
+VIEW_URL="$WORKER_URL/view/$TOKEN"
 
 # Proves the secret took effect without ever rendering it. Cloudflare needs a
 # moment to propagate, so this retries rather than judging on one attempt.
