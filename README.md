@@ -135,17 +135,31 @@ unavailable rather than erroring or hanging.
 
 ### Setting `VIEW_TOKEN`
 
-From a clone of this repo:
+**From inside a clone of this repo:**
 
 ```bash
 npm run set-view-token
 ```
 
-That is the whole procedure. Use the npm script rather than naming the file
-directly — `scripts\set-view-token.cmd` is a Windows path, and in bash (Git Bash,
-WSL, the shell behind most "run this" buttons) the backslash is an **escape
-character**, so it silently collapses to `scriptsset-view-token.cmd: command not
-found`. The npm script has no path separator in it and works from either shell.
+**From anywhere at all** — the script relocates itself, so cwd doesn't matter:
+
+```bash
+powershell -NoProfile -ExecutionPolicy Bypass -File "/full/path/to/context-keeper-remote/scripts/set-view-token.ps1"
+```
+
+Two things about how that command is written, both of which cost real debugging
+time here:
+
+- **Forward slashes, even on Windows.** In bash — Git Bash, WSL, the shell behind
+  most "run this" buttons — a backslash is an **escape character**, so
+  `scripts\set-view-token.cmd` silently collapses to
+  `scriptsset-view-token.cmd: command not found`. It names a file nobody wrote, so
+  it reads as a broken script rather than a mangled path.
+- **`npm run` needs the repo as its working directory.** Run it from one directory
+  up and you get `npm error enoent Could not read package.json` wrapped in a
+  PowerShell `NativeCommandError` whose first line is `At line:1 char:1` — which
+  says nothing about directories and looks like the script crashed. It never ran.
+  The absolute-path form above has no such requirement.
 
 Double-clicking `scripts/set-view-token.cmd` in Explorer works too. On macOS/Linux,
 `scripts/set-view-token.sh`.

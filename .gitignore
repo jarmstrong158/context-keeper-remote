@@ -23,3 +23,6 @@ dist/
 # Run log from scripts/set-view-token.ps1. The token is scrubbed out before
 # the file is left on disk, but it still records your environment -- untracked.
 .view-setup.log
+
+# Capture file from the setup-script troubleshooting instructions.
+setup-output.txt
