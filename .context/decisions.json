@@ -206,5 +206,58 @@
     "updated_at": "2026-08-06T12:23:58.575646+00:00",
     "verified_at": "2026-08-06T12:23:58.575646+00:00",
     "verified_sha": "6960bea9afb1a5db2bfc640eed536f3522bb21fd"
+  },
+  {
+    "id": "dec-005-f67d",
+    "summary": "connect-cambium deploys cambium-remote itself when the status route is missing, rather than telling the operator to. That removes cambium-remote's broken CI from the critical path; repairing that CI is a separate, optional script.",
+    "problem": "The Knowledge tab could not be wired because cambium-remote had never been deployed with its /status route: its GitHub Actions deploy fails on every merge with empty CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID secrets, and fails green enough that nobody noticed. The setup script detected the missing route and printed \"deploy it, then re-run this\" -- which is homework, and homework that presupposed knowing the CI was broken. The operator's position was that a setup script exists precisely so none of that lands on them.",
+    "why_chosen": "wrangler is already authenticated on the machine running the script -- it is the same login being used to write secrets on both Workers -- so deploying is available at zero additional credential cost. Doing it there converts a blocking prerequisite into a step the tool handles, and makes the feature independent of a CI pipeline it does not otherwise need. It is scoped tightly: it fires only when the route has already failed to answer for 60 seconds, it deploys that repo's own checked-out main and nothing of this repo's, and -SkipDeploy opts out. Repairing the CI is then genuinely optional, which is the correct priority -- auto-deploy on push is a convenience, while the Knowledge tab working is the actual goal.",
+    "what_we_tried": "The first response was to document the CI breakage in the README and leave it to the operator, which they rejected. Setting the GitHub secrets directly from the agent session was attempted and blocked by the permission classifier. Full automation of the API token was investigated and is impossible: creating a Cloudflare API token requires an existing token carrying User API Tokens: Edit, and wrangler's OAuth session is scoped to Workers operations, so no credential on the machine can mint the credential.",
+    "tradeoffs": "A script that connects two services now also deploys one of them, which is a larger side effect than its name suggests and is why it is opt-out and gated behind an existing failure. It also means a stale checkout of cambium-remote would deploy stale code -- acceptable because the alternative was the route staying broken, and because it deploys committed main rather than a working tree.",
+    "alternatives": [
+      {
+        "option": "Document the CI breakage and let the operator fix it",
+        "reason_rejected": "Makes a prerequisite out of something the tool can do, and requires the operator to first discover that a green-looking workflow deployed nothing."
+      },
+      {
+        "option": "Set the GitHub secrets from the agent session",
+        "reason_rejected": "Blocked by the permission classifier, and the API token half is a credential the agent should not handle regardless."
+      },
+      {
+        "option": "Switch cambium-remote to Cloudflare Workers Builds",
+        "reason_rejected": "Removes the secrets entirely but replaces one manual dashboard step with another, and does not help the run that is failing right now."
+      }
+    ],
+    "constraints_created": [
+      "A setup script may deploy another Worker only when the failure it is diagnosing has already occurred, only that repo's committed main, and only with an opt-out flag"
+    ],
+    "related_to": [
+      "dec-004-8f6b",
+      "con-005-d300",
+      "con-007-1de7"
+    ],
+    "tags": [
+      "setup",
+      "deploy",
+      "ci",
+      "cambium",
+      "automation",
+      "ux"
+    ],
+    "retrieval_hints": [
+      "why does connect-cambium deploy another worker",
+      "cambium-remote CI deploy fails silently",
+      "CLOUDFLARE_API_TOKEN empty in github actions",
+      "do I need cambium CI for the knowledge tab",
+      "can a script create a cloudflare api token"
+    ],
+    "origin": "user",
+    "schema_version": 4,
+    "status": "active",
+    "superseded_by": null,
+    "created_at": "2026-08-06T14:24:31.992565+00:00",
+    "updated_at": "2026-08-06T14:24:41.766737+00:00",
+    "verified_at": "2026-08-06T14:24:41.736193+00:00",
+    "verified_sha": "eb034c0f3eea896b22e6dd63e1dee87f7fcd7162"
   }
 ]
