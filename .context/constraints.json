@@ -314,5 +314,38 @@
     "updated_at": "2026-08-06T14:49:39.249680+00:00",
     "verified_at": "2026-08-06T14:49:39.249680+00:00",
     "verified_sha": "0bbbfb2d0095958179b1d2bbded3f167fa86b409"
+  },
+  {
+    "id": "con-010-4839",
+    "rule": "There is exactly one HTML escaper, in src/html.ts. Never define a second one, and never inline an escape in a template. Every string the view renders comes from the store and must pass through it.",
+    "reason": "The escaper is the only thing between a recorded string and the rendered page, and the store holds whatever a project wrote -- including text a future contributor pastes from an untrusted source. Copies of it are not merely duplication: they only have to agree until somebody improves one, and the copy that drifts is the one nobody re-reads, so the divergence surfaces as an XSS hole rather than as a failing test. It must also escape both quote characters, not just the angle brackets, because these templates interpolate into attribute values as well as text nodes -- an href attribute built from an entry id is safe only because the double quote is covered.",
+    "triggering_incident": "An audit found esc() defined three times -- view.ts, detail.ts and health.ts -- byte-identical, which was luck rather than design: each was written by copying the last while splitting the view into modules. Nothing would have caught a divergence, since no test compared them and each file's own tests passed against its own copy. Consolidated into src/html.ts and imported everywhere.",
+    "enforced_by": "grep -c '^function esc' src/*.ts must return nothing outside src/html.ts; test/detail.test.ts covers escaping of recorded summaries, project names and the echoed search term",
+    "scope": "src/html.ts",
+    "hardness": "absolute",
+    "related_to": [
+      "dec-002-ca5b"
+    ],
+    "tags": [
+      "security",
+      "xss",
+      "html",
+      "view",
+      "duplication"
+    ],
+    "retrieval_hints": [
+      "where is the html escaper",
+      "can I add an esc function here",
+      "xss in the phone view",
+      "escaping recorded text before rendering",
+      "duplicate escape implementations"
+    ],
+    "origin": "agent",
+    "schema_version": 4,
+    "status": "active",
+    "created_at": "2026-08-06T16:44:30.762122+00:00",
+    "updated_at": "2026-08-06T16:44:38.627405+00:00",
+    "verified_at": "2026-08-06T16:44:38.594365+00:00",
+    "verified_sha": "885d58cda9b6aa9e9e143e4881cb0ecd131a3aca"
   }
 ]
