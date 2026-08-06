@@ -37,8 +37,20 @@
 param(
     [string]$CambiumDir = "",
     [string]$CambiumUrl = "",
-    [switch]$Yes
+    [switch]$Yes,
+    [switch]$DryRun,
+    # Wrangler environments differ between the two Workers and passing the wrong
+    # one is a hard failure, not a no-op: cambium-remote has no [env.production]
+    # section at all -- it deploys with a bare `wrangler deploy` -- while this
+    # repo keeps its CI deploy under --env production. So they cannot share a
+    # flag, and defaulting both to "production" would have failed at the install
+    # step with "No environment found in configuration with name production".
+    [string]$CambiumEnv = "",
+    [string]$LocalEnv = "production"
 )
+
+$cambiumEnvArgs = @(); if ($CambiumEnv) { $cambiumEnvArgs = @("--env", $CambiumEnv) }
+$localEnvArgs   = @(); if ($LocalEnv)   { $localEnvArgs   = @("--env", $LocalEnv) }
 
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
@@ -122,7 +134,7 @@ if ($who.Code -ne 0 -or $who.Output -match "not authenticated|not logged in") {
 Write-Host " ok" -ForegroundColor Green
 
 # --- replace confirmation, failing closed (con-004) -----------------------
-$existing = Invoke-Wrangler -WranglerArgs @("secret", "list", "--env", "production") -In $CambiumDir
+$existing = Invoke-Wrangler -WranglerArgs (@("secret", "list") + $cambiumEnvArgs) -In $CambiumDir
 if ($existing.Output -match '"name"\s*:\s*"STATUS_TOKEN"' -and -not $Yes) {
     Write-Host ""
     Write-Host "  cambium-remote already has a STATUS_TOKEN." -ForegroundColor Yellow
@@ -136,6 +148,18 @@ if ($existing.Output -match '"name"\s*:\s*"STATUS_TOKEN"' -and -not $Yes) {
     if ($go -notmatch '^\s*[Yy]') { Write-Host "  cancelled.`n"; exit 0 }
 }
 
+if ($DryRun) {
+    Write-Host ""
+    Write-Host "  dry run -- resolution and preflight succeeded." -ForegroundColor Green
+    Say "would generate a 32-byte STATUS_TOKEN"
+    Say "would run: wrangler secret put STATUS_TOKEN $($cambiumEnvArgs -join ' ')  in $CambiumDir"
+    Say "would poll $CambiumUrl/status/<token> until it returns counts"
+    Say "would then set CAMBIUM_STATUS_URL here"
+    Say "Nothing was installed and nothing was probed."
+    Write-Host ""
+    exit 0
+}
+
 # --- generate -------------------------------------------------------------
 # RNGCryptoServiceProvider, not RandomNumberGenerator::Fill: the latter does not
 # exist on the .NET Framework that PowerShell 5.1 runs on.
@@ -147,7 +171,7 @@ $mask = $token.Substring(0, 4) + ("." * 12) + $token.Substring($token.Length - 4
 
 # --- install on cambium-remote -------------------------------------------
 Write-Host "  installing STATUS_TOKEN on cambium-remote..." -NoNewline
-$put = Invoke-Wrangler -WranglerArgs @("secret", "put", "STATUS_TOKEN", "--env", "production") -StdIn $token -In $CambiumDir
+$put = Invoke-Wrangler -WranglerArgs (@("secret", "put", "STATUS_TOKEN") + $cambiumEnvArgs) -StdIn $token -In $CambiumDir
 if ($put.Code -ne 0) {
     Write-Host ""
     ($put.Output -split "`r?`n" | Where-Object { $_ -match '\S' } | Select-Object -Last 5) |
@@ -185,7 +209,7 @@ Write-Host " ok" -ForegroundColor Green
 
 # --- install here ---------------------------------------------------------
 Write-Host "  installing CAMBIUM_STATUS_URL..." -NoNewline
-$put2 = Invoke-Wrangler -WranglerArgs @("secret", "put", "CAMBIUM_STATUS_URL", "--env", "production") -StdIn $statusUrl -In $repo
+$put2 = Invoke-Wrangler -WranglerArgs (@("secret", "put", "CAMBIUM_STATUS_URL") + $localEnvArgs) -StdIn $statusUrl -In $repo
 if ($put2.Code -ne 0) { Write-Host ""; Fail "wrangler secret put failed here (exit $($put2.Code))." }
 Write-Host " ok" -ForegroundColor Green
 
