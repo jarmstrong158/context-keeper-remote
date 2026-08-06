@@ -72,11 +72,33 @@ export default {
       url.pathname === "/view/app.js"
     ) {
       log("request", { route: url.pathname, method: request.method });
-      // Assets authenticate on the cookie alone. The <link rel="manifest"> in
-      // the page carries crossorigin="use-credentials" so the browser sends it.
-      const ok = await cookieAuthorised(request, env.VIEW_TOKEN);
-      log("auth", { ok, surface: "view-asset" });
-      if (!ok) return notFound();
+
+      // The manifest and icons are served WITHOUT the cookie, deliberately.
+      //
+      // They contain no store data: an app name, a display mode, and a picture
+      // of four coloured bars. Gating them bought nothing and cost the whole
+      // feature -- a manifest fetch that 404s makes Chrome refuse to install
+      // with no error anywhere, and browsers differ on whether they attach
+      // credentials to a manifest request at all. crossorigin="use-credentials"
+      // is supposed to handle that; relying on every browser honouring it for
+      // a file with nothing to protect is a bet with no upside.
+      //
+      // sw.js and app.js stay gated: they are behind /view, and a service
+      // worker is a persistent thing to hand an unauthenticated caller.
+      const isPublicAsset =
+        url.pathname === "/view/manifest.webmanifest" ||
+        url.pathname === "/view/icon.png" ||
+        url.pathname === "/view/icon-192.png";
+
+      if (!isPublicAsset) {
+        const ok = await cookieAuthorised(request, env.VIEW_TOKEN);
+        log("auth", { ok, surface: "view-asset" });
+        if (!ok) return notFound();
+      }
+
+      // Even the public assets stay off when the feature is off, so a Worker
+      // with no VIEW_TOKEN still looks exactly like one without the route.
+      if (!env.VIEW_TOKEN) return notFound();
       if (request.method !== "GET" && request.method !== "HEAD") {
         return new Response("Method Not Allowed", { status: 405, headers: { allow: "GET, HEAD" } });
       }

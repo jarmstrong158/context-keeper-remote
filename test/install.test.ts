@@ -129,9 +129,29 @@ describe("installable assets", () => {
     }
   });
 
-  it("404s assets without the cookie", async () => {
-    expect((await call("/view/icon.png")).status).toBe(404);
-    expect((await call("/view/manifest.webmanifest")).status).toBe(404);
+  it("serves the manifest and icons WITHOUT a cookie, on purpose", async () => {
+    // They hold no store data -- an app name, a display mode, and a picture of
+    // four coloured bars. Gating them bought nothing and cost the feature: a
+    // manifest fetch that 404s makes Chrome refuse to install with no error
+    // anywhere, and browsers differ on whether they send credentials with a
+    // manifest request at all.
+    expect((await call("/view/manifest.webmanifest")).status).toBe(200);
+    expect((await call("/view/icon.png")).status).toBe(200);
+    expect((await call("/view/icon-192.png")).status).toBe(200);
+  });
+
+  it("still 404s them when VIEW_TOKEN is unset, so the feature stays invisible", async () => {
+    const off = { VIEW_TOKEN: undefined };
+    expect((await call("/view/manifest.webmanifest", {}, off)).status).toBe(404);
+    expect((await call("/view/icon.png", {}, off)).status).toBe(404);
+  });
+
+  it("keeps sw.js and app.js behind the cookie", async () => {
+    // A service worker is a persistent thing to hand an unauthenticated caller,
+    // and unlike the manifest there is no browser quirk forcing the issue.
+    expect((await call("/view/sw.js")).status).toBe(404);
+    expect((await call("/view/app.js")).status).toBe(404);
+    expect((await call("/view/sw.js", withCookie(VIEW))).status).toBe(200);
   });
 
   it("does not let an asset path be mistaken for a token", async () => {

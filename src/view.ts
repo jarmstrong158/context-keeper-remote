@@ -430,7 +430,7 @@ function shell(
      fetched WITHOUT cookies by default, so behind a credential it would 404 and
      the install prompt would silently never appear. The icon is an ordinary
      same-origin image request and carries the cookie on its own. -->
-<link rel="manifest" href="/view/manifest.webmanifest" crossorigin="use-credentials">
+<link rel="manifest" href="/view/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/view/icon.png">
 <link rel="icon" type="image/png" href="/view/icon.png">
 <!-- Registers the service worker: what makes this work offline and makes a tap
