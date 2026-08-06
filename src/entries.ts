@@ -43,6 +43,40 @@ export function mapRationale(payload: Record<string, unknown>): Record<string, u
   return out;
 }
 
+// One incoming store-format object, coerced into the columns the write helpers
+// take. Both bulk tools received the same shape and each re-derived it inline
+// with its own chain of `typeof raw.x === "string" ? ... : undefined`. They
+// drifted exactly where it mattered: upsert passed `status` through verbatim
+// while import squeezed it into the active/deprecated enum, so every SUPERSEDED
+// entry arrived active -- `superseded_by` survived the trip and the status did
+// not, leaving the remote showing a replaced decision as current while still
+// naming its replacement. One coercion, so the two paths cannot disagree again.
+export interface CoercedEntry {
+  id?: string;
+  status?: string;
+  created_at?: string;
+  updated_at?: string;
+  superseded_by: string | null;
+  payload: Record<string, unknown>;
+}
+
+function str(value: unknown): string | undefined {
+  return typeof value === "string" && value ? value : undefined;
+}
+
+export function coerceIncomingEntry(kind: Kind, raw: Record<string, unknown>): CoercedEntry {
+  return {
+    id: str(raw.id),
+    // Verbatim: the column is free-form TEXT precisely so a lifecycle state the
+    // two-value enum cannot hold ('superseded') survives the round trip.
+    status: str(raw.status),
+    created_at: str(raw.created_at),
+    updated_at: str(raw.updated_at),
+    superseded_by: str(raw.superseded_by) ?? null,
+    payload: buildPayload(kind, raw),
+  };
+}
+
 // Build the stored payload for a fresh entry from tool input, per-kind.
 export function buildPayload(kind: Kind, input: Record<string, unknown>): Record<string, unknown> {
   const payload: Record<string, unknown> = { ...input };
@@ -58,6 +92,34 @@ export function buildPayload(kind: Kind, input: Record<string, unknown>): Record
   return payload;
 }
 
+// The one INSERT. Written out three times before, which is how the column list
+// and the placeholder count had to be kept in step by eye across insertEntry,
+// insertWithId and upsertEntry -- a mismatch there is a runtime error on a
+// write path, discovered by a user.
+const INSERT_ENTRY_SQL =
+  `INSERT INTO entries (id, kind, project, status, created_at, updated_at, superseded_by, payload)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
+
+async function insertRow(
+  db: D1Database,
+  row: {
+    id: string;
+    kind: Kind;
+    project: string;
+    status: string;
+    created_at: string;
+    updated_at: string;
+    superseded_by: string | null;
+    payload: Record<string, unknown>;
+  },
+): Promise<void> {
+  await db
+    .prepare(INSERT_ENTRY_SQL)
+    .bind(row.id, row.kind, row.project, row.status, row.created_at,
+          row.updated_at, row.superseded_by, JSON.stringify(row.payload))
+    .run();
+}
+
 // Insert a new entry, generating its id. If a concurrent writer grabbed the
 // same suffix we get a PK collision, re-derive the id via nextId, and retry.
 //
@@ -70,22 +132,22 @@ const MAX_INSERT_ATTEMPTS = 5;
 
 export async function insertEntry(
   db: D1Database,
-  args: { kind: Kind; project: string; status?: Status; payload: Record<string, unknown> },
+  args: { kind: Kind; project: string; status?: string; payload: Record<string, unknown> },
 ): Promise<Entry> {
-  const status: Status = args.status ?? "active";
+  // Verbatim, like insertWithId/upsertEntry: the column is free-form TEXT and
+  // 'superseded' is a real lifecycle state the two-value enum cannot hold.
+  const status = (args.status ?? "active") as Status;
   let lastErr: unknown;
   for (let attempt = 0; attempt < MAX_INSERT_ATTEMPTS; attempt++) {
     if (attempt > 0) await backoff(attempt);
     const id = await nextId(db, args.project, args.kind);
     const now = nowIso();
     try {
-      await db
-        .prepare(
-          `INSERT INTO entries (id, kind, project, status, created_at, updated_at, superseded_by, payload)
-           VALUES (?, ?, ?, ?, ?, ?, NULL, ?)`,
-        )
-        .bind(id, args.kind, args.project, status, now, now, JSON.stringify(args.payload))
-        .run();
+      await insertRow(db, {
+        id, kind: args.kind, project: args.project, status,
+        created_at: now, updated_at: now, superseded_by: null,
+        payload: args.payload,
+      });
       return {
         id,
         kind: args.kind,
@@ -126,7 +188,9 @@ export async function insertWithId(
     id: string;
     kind: Kind;
     project: string;
-    status?: Status;
+    // Verbatim, like upsertEntry: may be 'superseded', not just the
+    // active/deprecated enum. The column is free-form TEXT.
+    status?: string;
     created_at?: string;
     updated_at?: string;
     superseded_by?: string | null;
@@ -141,22 +205,16 @@ export async function insertWithId(
 
   const now = nowIso();
   try {
-    await db
-      .prepare(
-        `INSERT INTO entries (id, kind, project, status, created_at, updated_at, superseded_by, payload)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .bind(
-        args.id,
-        args.kind,
-        args.project,
-        args.status ?? "active",
-        args.created_at ?? now,
-        args.updated_at ?? now,
-        args.superseded_by ?? null,
-        JSON.stringify(args.payload),
-      )
-      .run();
+    await insertRow(db, {
+      id: args.id,
+      kind: args.kind,
+      project: args.project,
+      status: args.status ?? "active",
+      created_at: args.created_at ?? now,
+      updated_at: args.updated_at ?? now,
+      superseded_by: args.superseded_by ?? null,
+      payload: args.payload,
+    });
     return { inserted: true };
   } catch (err) {
     if (isConflict(err)) return { inserted: false, reason: "id already exists" };
@@ -195,22 +253,16 @@ export async function upsertEntry(
   const now = nowIso();
 
   if (!existing) {
-    await db
-      .prepare(
-        `INSERT INTO entries (id, kind, project, status, created_at, updated_at, superseded_by, payload)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .bind(
-        args.id,
-        args.kind,
-        args.project,
-        args.status ?? "active",
-        args.created_at ?? now,
-        args.updated_at ?? now,
-        args.superseded_by ?? null,
-        JSON.stringify(args.payload),
-      )
-      .run();
+    await insertRow(db, {
+      id: args.id,
+      kind: args.kind,
+      project: args.project,
+      status: args.status ?? "active",
+      created_at: args.created_at ?? now,
+      updated_at: args.updated_at ?? now,
+      superseded_by: args.superseded_by ?? null,
+      payload: args.payload,
+    });
     return { action: "created" };
   }
 
@@ -236,6 +288,67 @@ export async function upsertEntry(
     )
     .run();
   return { action: "updated", previous: existing };
+}
+
+// --- supersession history ---------------------------------------------------
+
+// The predecessor line, byte-identical to what the local server prepends
+// (context-keeper server.py: _compact / _predecessor_line / _predecessor_map).
+//
+// Both halves of the pair have to agree. get_context is the same tool over two
+// transports, and an agent reading it over HTTP has to see the same history as
+// one reading it over stdio -- otherwise "what changed, and why" silently
+// depends on which client the session happened to connect with, which is the
+// least debuggable kind of divergence. Any edit to the format here is an edit
+// to both files; `predecessor line` in test/server.test.ts pins the shape.
+
+const PREDECESSOR_TEXT_CHARS = 140;
+
+export function compactText(text: unknown, limit: number): string {
+  const s = String(text ?? "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .join(" ");
+  if (s.length <= limit) return s;
+  return s.slice(0, limit - 3).replace(/\s+$/, "") + "...";
+}
+
+function entryLabel(entry: Entry): string {
+  const p = entry.payload;
+  return String(p.summary || p.rule || p.name || "?");
+}
+
+export function predecessorLine(prior: Entry, successor: Entry): string {
+  const was = compactText(entryLabel(prior), PREDECESSOR_TEXT_CHARS);
+  // deprecate_entry(superseded_by) records an explicit reason; the
+  // record(supersedes) path has none, so fall back to what forced the
+  // replacement. Never invent one.
+  const why = compactText(
+    prior.payload.deprecated_reason || successor.payload.problem || "",
+    PREDECESSOR_TEXT_CHARS,
+  );
+  const line = `supersedes ${prior.id}: was "${was}"`;
+  return why ? `${line} -- changed because: ${why}` : line;
+}
+
+// { replacement_id -> predecessor }. Must be built over ALL entries including
+// deprecated/superseded ones: a predecessor is by definition no longer active,
+// so the retrieval filters have already dropped it.
+export function predecessorMap(all: Entry[]): Map<string, Entry> {
+  const out = new Map<string, Entry>();
+  for (const e of all) {
+    const newer = e.superseded_by;
+    if (!newer || !e.id) continue;
+    // Several entries can point at one replacement; keep the most recently
+    // changed -- the IMMEDIATE predecessor. Same tiebreak as local.
+    const prior = out.get(newer);
+    if (!prior || sortKey(e) > sortKey(prior)) out.set(newer, e);
+  }
+  return out;
+}
+
+function sortKey(e: Entry): string {
+  return `${e.updated_at ?? ""} ${e.id ?? ""}`;
 }
 
 // --- text + scoring ---------------------------------------------------------

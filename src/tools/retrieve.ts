@@ -1,7 +1,14 @@
 import { z } from "zod";
 import { defineTool } from "../mcp";
 import { KINDS, type Kind, listEntries, listProjects, resolveProject, getEntry } from "../db";
-import { normalizeTags, scoreEntry, searchableText, tokenize } from "../entries";
+import {
+  normalizeTags,
+  predecessorLine,
+  predecessorMap,
+  scoreEntry,
+  searchableText,
+  tokenize,
+} from "../entries";
 import { projectField, tagsField } from "./common";
 
 const kindField = z
@@ -25,10 +32,18 @@ export const getContextTool = defineTool({
   }),
   async handler(input, { db }) {
     const project = await resolveProject(db, input.project);
-    const entries = await listEntries(db, project, {
+    // Fetch everything once and filter in JS rather than in SQL: the
+    // predecessor of a returned entry is superseded or deprecated, so a query
+    // narrowed to active rows cannot see it. Filtering to `status === "active"`
+    // here is exactly what the old `includeDeprecated: false` clause did.
+    const all = await listEntries(db, project, {
       kind: input.kind as Kind | undefined,
-      includeDeprecated: input.include_deprecated ?? false,
+      includeDeprecated: true,
     });
+    const entries = (input.include_deprecated ?? false)
+      ? all
+      : all.filter((e) => e.status === "active");
+    const priorOf = predecessorMap(all);
     const terms = tokenize(input.query);
     const limit = input.limit ?? 10;
     const ranked = entries
@@ -36,7 +51,19 @@ export const getContextTool = defineTool({
       .filter((r) => r.score > 0)
       .sort((a, b) => b.score - a.score)
       .slice(0, limit)
-      .map((r) => ({ score: Number(r.score.toFixed(3)), ...r.entry }));
+      .map((r) => {
+        const prior = priorOf.get(r.entry.id);
+        // Prepended, like local: the history reads before the entry it
+        // explains. No token budget on this transport, so there is no
+        // id-trail fallback to make -- the line always fits.
+        return prior
+          ? {
+              score: Number(r.score.toFixed(3)),
+              predecessor: predecessorLine(prior, r.entry),
+              ...r.entry,
+            }
+          : { score: Number(r.score.toFixed(3)), ...r.entry };
+      });
     return { project, query: input.query, count: ranked.length, results: ranked };
   },
 });

@@ -253,6 +253,140 @@ describe("deprecate / supersede chain", () => {
   });
 });
 
+describe("predecessor line", () => {
+  // get_context is one tool over two transports. If only the local server
+  // prepends the history, "what changed, and why" silently depends on which
+  // client the session connected with. The exact format is mirrored from
+  // context-keeper server.py::_predecessor_line -- edit both or neither.
+  it("prepends the immediate predecessor to its replacement", async () => {
+    const p = project("pred");
+    const old = await callTool("record_decision", {
+      project: p,
+      summary: "sync is additive-only",
+    });
+    const next = await callTool("record_decision", {
+      project: p,
+      summary: "sync is newest-wins",
+      problem: "additive sync froze deprecations out of the mirror",
+    });
+    await callTool("deprecate_entry", {
+      project: p,
+      id: old.id,
+      reason: "replaced by the timestamp merge",
+      superseded_by: next.id,
+    });
+
+    const ctx = await callTool("get_context", { project: p, query: "sync" });
+    const hit = ctx.results.find((e: any) => e.id === next.id);
+    expect(hit.predecessor).toBe(
+      `supersedes ${old.id}: was "sync is additive-only" -- changed because: replaced by the timestamp merge`,
+    );
+  });
+
+  it("falls back to the successor's problem when there is no explicit reason", async () => {
+    const p = project("pred-fallback");
+    const old = await callTool("record_decision", { project: p, summary: "the old plan" });
+    const next = await callTool("record_decision", {
+      project: p,
+      summary: "the new plan",
+      problem: "the vendor changed the API contract",
+    });
+    // superseded_by set without a deprecation reason, as the local
+    // record_entry(supersedes=[...]) path leaves it.
+    await callTool("upsert_entries", {
+      project: p,
+      kind: "decision",
+      entries: [
+        {
+          id: old.id,
+          summary: "the old plan",
+          status: "superseded",
+          superseded_by: next.id,
+          updated_at: "2099-01-01T00:00:00+00:00",
+        },
+      ],
+    });
+    const ctx = await callTool("get_context", { project: p, query: "plan" });
+    const hit = ctx.results.find((e: any) => e.id === next.id);
+    expect(hit.predecessor).toContain("the vendor changed the API contract");
+  });
+
+  it("leaves entries without history untouched", async () => {
+    const p = project("pred-none");
+    await callTool("record_decision", { project: p, summary: "a lone decision" });
+    const ctx = await callTool("get_context", { project: p, query: "lone" });
+    expect(ctx.results[0].predecessor).toBeUndefined();
+  });
+
+  it("keeps the predecessor out of the results themselves", async () => {
+    // The predecessor is superseded, so it must stay excluded from ranking --
+    // fetching it for the line must not smuggle it back into the payload.
+    const p = project("pred-excluded");
+    const old = await callTool("record_decision", { project: p, summary: "retired idea" });
+    const next = await callTool("record_decision", { project: p, summary: "retired idea, redone" });
+    await callTool("deprecate_entry", {
+      project: p,
+      id: old.id,
+      reason: "no longer how it works",
+      superseded_by: next.id,
+    });
+    const ctx = await callTool("get_context", { project: p, query: "retired idea" });
+    expect(ctx.results.find((e: any) => e.id === old.id)).toBeUndefined();
+    expect(ctx.results.find((e: any) => e.id === next.id)).toBeDefined();
+  });
+});
+
+describe("supersession round-trip", () => {
+  // The mirror pushes through upsert_entries and backfills through
+  // import_entries. A superseded entry has to survive BOTH, or the remote
+  // shows a replaced decision as current while still naming its replacement.
+  const supersededEntry = {
+    id: "dec-001",
+    summary: "the superseded original",
+    status: "superseded",
+    superseded_by: "dec-002",
+    created_at: "2026-01-01T00:00:00+00:00",
+    updated_at: "2026-01-02T00:00:00+00:00",
+  };
+
+  it("upsert_entries preserves status and superseded_by", async () => {
+    const p = project("sup-upsert");
+    await callTool("upsert_entries", {
+      project: p,
+      kind: "decision",
+      entries: [supersededEntry],
+    });
+    const q = await callTool("query_entries", { project: p, id: "dec-001" });
+    expect(q.results[0].status).toBe("superseded");
+    expect(q.results[0].superseded_by).toBe("dec-002");
+  });
+
+  it("import_entries preserves status and superseded_by", async () => {
+    const p = project("sup-import");
+    await callTool("import_entries", {
+      project: p,
+      kind: "decision",
+      entries: [supersededEntry],
+    });
+    const q = await callTool("query_entries", { project: p, id: "dec-001" });
+    // Regression: status was squeezed into the active/deprecated enum here, so
+    // superseded_by survived the trip and the status did not.
+    expect(q.results[0].status).toBe("superseded");
+    expect(q.results[0].superseded_by).toBe("dec-002");
+  });
+
+  it("a superseded entry stays out of default retrieval after import", async () => {
+    const p = project("sup-import-retrieval");
+    await callTool("import_entries", {
+      project: p,
+      kind: "decision",
+      entries: [supersededEntry],
+    });
+    const ctx = await callTool("get_context", { project: p, query: "superseded original" });
+    expect(ctx.results.find((e: any) => e.id === "dec-001")).toBeUndefined();
+  });
+});
+
 describe("query filters", () => {
   it("filters by tags, text, status, and id", async () => {
     const p = project("filter");

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { defineTool } from "../mcp";
 import { type Kind, resolveProject } from "../db";
-import { buildPayload, upsertEntry } from "../entries";
+import { coerceIncomingEntry, upsertEntry } from "../entries";
 import { MAX_BATCH_ENTRIES, projectField } from "./common";
 
 // Bulk upsert from the local context-keeper store format. Same input shape as
@@ -48,28 +48,20 @@ export const upsertEntriesTool = defineTool({
     let skipped = 0;
 
     for (const raw of input.entries) {
-      const incomingId = typeof raw.id === "string" ? raw.id : undefined;
+      const { id: incomingId, payload, ...cols } = coerceIncomingEntry(kind, raw);
       if (!incomingId) {
         skipped++;
         results.push({ id: "", action: "skipped_no_id" });
         continue;
       }
-      // Status is passed through verbatim (including 'superseded') rather than
-      // squeezed into the active/deprecated enum, so a superseded decision
-      // mirrors faithfully.
-      const status = typeof raw.status === "string" && raw.status ? raw.status : undefined;
-      const payload = buildPayload(kind, raw);
 
       try {
         const res = await upsertEntry(db, {
           id: incomingId,
           kind,
           project,
-          status,
-          created_at: typeof raw.created_at === "string" ? raw.created_at : undefined,
-          updated_at: typeof raw.updated_at === "string" ? raw.updated_at : undefined,
-          superseded_by: typeof raw.superseded_by === "string" ? raw.superseded_by : null,
           payload,
+          ...cols,
         });
         if (res.action === "created") created++;
         else if (res.action === "updated") updated++;
