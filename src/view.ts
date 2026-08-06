@@ -28,6 +28,7 @@
 // glanceable and not.
 
 import { hydrate, type EntryRow } from "./db";
+import { esc } from "./html";
 import {
   ago, entryDetail, entryRow, loadEntry, loadProject, PAGE_SIZE, search,
 } from "./detail";
@@ -177,11 +178,6 @@ async function fetchKnowledge(
 
 const MAX_FEED = 25;
 
-function esc(s: unknown): string {
-  return String(s ?? "").replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!,
-  );
-}
 
 
 

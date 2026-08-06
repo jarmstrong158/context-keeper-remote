@@ -12,6 +12,7 @@
 // true about what you are looking at.
 
 import { hydrate, type Entry, type EntryRow } from "./db";
+import { esc } from "./html";
 
 // Older than this without an update is "stale" -- not wrong, but nobody has
 // confirmed it in half a year. Deliberately generous: context-keeper's own
@@ -147,11 +148,6 @@ export async function healthReport(db: D1Database): Promise<HealthReport> {
   };
 }
 
-function esc(s: unknown): string {
-  return String(s ?? "").replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!,
-  );
-}
 
 function bar(n: number, d: number, cls: string, label: string, note: string): string {
   const pct = d ? Math.round((n / d) * 1000) / 10 : 0;

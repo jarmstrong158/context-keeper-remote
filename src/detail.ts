@@ -25,6 +25,7 @@
 // whole thing works on a bad connection and with JS disabled.
 
 import { type Entry, hydrate, type EntryRow } from "./db";
+import { clamp, esc } from "./html";
 
 export const PAGE_SIZE = 60;
 
@@ -47,11 +48,6 @@ const META_FIELDS: Array<[string, string]> = [
   ["origin", "Origin"],
 ];
 
-function esc(s: unknown): string {
-  return String(s ?? "").replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!,
-  );
-}
 
 /** Preserve paragraph breaks without allowing any markup through. */
 function para(s: unknown): string {
@@ -158,9 +154,6 @@ export function entryRow(e: Entry, showProject = true): string {
     <div class="t">${esc(clamp(title(e), 180))}</div></a></li>`;
 }
 
-function clamp(s: string, n: number): string {
-  return s.length > n ? s.slice(0, n - 1) + "…" : s;
-}
 
 export function ago(iso: string): string {
   const then = Date.parse(iso || "");

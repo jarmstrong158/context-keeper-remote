@@ -21,6 +21,12 @@ CREATE TABLE IF NOT EXISTS entries (
 
 CREATE INDEX IF NOT EXISTS idx_entries_pks ON entries(project, kind, status);
 
+-- The phone view's two hot reads. idx_entries_pks leads with `project`, so it
+-- cannot serve a status-only filter, and supersession is recorded forwards so
+-- looking backwards means asking who points at us.
+CREATE INDEX IF NOT EXISTS idx_entries_status_updated ON entries(status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_entries_superseded ON entries(superseded_by);
+
 CREATE TABLE IF NOT EXISTS config (
   project TEXT,
   key TEXT,

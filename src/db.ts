@@ -44,6 +44,21 @@ const MIGRATIONS = [
     PRIMARY KEY (project, id)
   )`,
   `CREATE INDEX IF NOT EXISTS idx_entries_pks ON entries(project, kind, status)`,
+  // The phone view's two hot reads, neither of which the composite index above
+  // can serve:
+  //
+  //   /view          SELECT ... WHERE status='active' ORDER BY updated_at DESC
+  //                  runs on every load of the default tab. idx_entries_pks
+  //                  leads with `project`, so a status-only filter cannot use
+  //                  it and SQLite scans then sorts the whole table.
+  //   /view?e=<id>   SELECT ... WHERE superseded_by = ? finds what an entry
+  //                  replaced. Supersession is recorded forwards, so the only
+  //                  way to look backwards is to ask who points at us -- an
+  //                  unindexed full scan on every entry detail page.
+  //
+  // Both are cheap at a few hundred rows and neither stays cheap.
+  `CREATE INDEX IF NOT EXISTS idx_entries_status_updated ON entries(status, updated_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_entries_superseded ON entries(superseded_by)`,
   `CREATE TABLE IF NOT EXISTS config (
     project TEXT,
     key TEXT,
