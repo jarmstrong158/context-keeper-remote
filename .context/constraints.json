@@ -381,5 +381,40 @@
     "updated_at": "2026-08-06T17:35:44.326530+00:00",
     "verified_at": "2026-08-06T17:35:44.292999+00:00",
     "verified_sha": "c4f760780864077defeff12d009ed137ae22b8cd"
+  },
+  {
+    "id": "con-012-14be",
+    "rule": "The web app manifest must declare a 192x192 icon as well as a 512x512, and every size it declares must actually resolve to a PNG of that exact pixel width.",
+    "reason": "Chrome on Android refuses to offer installation without a 192x192 icon, and the refusal is completely silent: no console error, no failed request, no install banner. It degrades to a plain home-screen shortcut that opens in an ordinary browser tab with the address bar showing, so the only symptom is a user saying the thing is not an app. Declaring a size that 404s is worse than omitting it, because the prompt still does not appear and now the cause is hidden behind a manifest that looks correct. Checking the manifest JSON alone is insufficient for the same reason -- the sizes it claims have to be fetched and their IHDR width read, or one image relabelled as two passes every check.",
+    "triggering_incident": "The phone view shipped with a single 512x512 icon and was reported as \"it just took me to the HTML page. thats not an app\". Every other install criterion passed -- name, standalone display, start_url, a registered service worker with a fetch handler -- so nothing looked wrong from the server side, and the manifest fetched cleanly with the cookie. Adding a 192 fixed it. The first attempt then declared /view/icon-192.png in the manifest before the route existed, which 404d: a manifest that promises an icon it cannot serve fails installability exactly as invisibly.",
+    "enforced_by": "test/install.test.ts -- asserts the manifest declares 192x192, 512x512 and a maskable purpose, then fetches each declared icon and checks the PNG IHDR width matches",
+    "scope": "src/install.ts",
+    "hardness": "absolute",
+    "related_to": [
+      "dec-003-0a24",
+      "dec-007-cae9"
+    ],
+    "tags": [
+      "pwa",
+      "android",
+      "chrome",
+      "manifest",
+      "icons",
+      "silent-failure"
+    ],
+    "retrieval_hints": [
+      "chrome does not offer to install the pwa",
+      "add to home screen opens in a browser tab",
+      "why is my web app not installable on android",
+      "manifest icon sizes required",
+      "install banner never appears"
+    ],
+    "origin": "agent",
+    "schema_version": 4,
+    "status": "active",
+    "created_at": "2026-08-06T22:48:41.492147+00:00",
+    "updated_at": "2026-08-06T22:48:41.492147+00:00",
+    "verified_at": "2026-08-06T22:48:41.492147+00:00",
+    "verified_sha": "2155283eba64268751d73f402c171794d84e9622"
   }
 ]
