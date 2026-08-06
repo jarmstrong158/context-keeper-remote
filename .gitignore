@@ -15,3 +15,7 @@ dist/
 # sync. Not memory; tracking them would make every mirrored session a commit.
 .context/.mirror_watermark
 .context/.mirror_conflicts.json
+
+# Written only by scripts/set-view-token.sh when no clipboard tool exists.
+# Contains the full view URL, which is a credential. Delete it once saved.
+.view-url

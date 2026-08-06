@@ -135,38 +135,52 @@ unavailable rather than erroring or hanging.
 
 ### Setting `VIEW_TOKEN`
 
-Run the script for your platform, from a clone of this repo:
+**Double-click `scripts/set-view-token.cmd`** in a clone of this repo. That is the
+whole procedure. On macOS/Linux run `scripts/set-view-token.sh`; from a terminal on
+Windows:
 
 ```bash
 powershell -ExecutionPolicy Bypass -File scripts/set-view-token.ps1
 ```
 
-(or double-click `scripts/set-view-token.cmd`; on macOS/Linux,
-`scripts/set-view-token.sh`.)
+One run generates the token, installs it, waits for the route to answer `200`, puts
+the URL on your clipboard, and opens it in your browser. On a fresh setup it asks
+nothing. The only prompt it will ever show is a confirmation when a `VIEW_TOKEN`
+already exists, since replacing one breaks every URL already in use — and `-Yes`
+(`CK_YES=1` for the shell version) skips even that.
 
-It generates 32 bytes from the OS CSPRNG, pipes them to `wrangler secret put` over
-**stdin**, copies the finished view URL to your clipboard, prints only a masked
-form, and then verifies the route answers `200`.
+It opens the browser on purpose, not as a flourish: once the URL is in history you
+can bookmark it or push it to your phone through browser sync, so a lost clipboard
+isn't a lost URL.
 
-Every one of those is load-bearing, because the whole point of a separate token is
-lost if setting it leaks it. Passing a secret as an **argument** puts it in your
-shell history and in the process list for every other user on the machine, for the
-lifetime of the call. **Echoing** it puts it in terminal scrollback, in any
-screen-share or screenshot, and in the transcript of any coding agent that ran the
-command — which is not hypothetical here: see the audit numbers in the next
-section. The script avoids all three, so the only two places the token ends up are
-Cloudflare and your clipboard.
+**What it refuses to do, and why.** The token is generated in-process and written to
+`wrangler secret put` over **stdin**, then displayed only as `abcd............wxyz`.
+Each of those matters, because a separate read-only credential is pointless if
+installing it leaks it:
 
-**Paste it into your password manager immediately.** Cloudflare stores secrets
-write-only; you cannot read one back, only replace it. Losing the URL means
-re-running the script, which invalidates the old one.
+- Passing a secret as an **argument** puts it in shell history *and in the process
+  list*, readable by any other user on the machine for the duration of the call.
+- **Echoing** it into a pipe puts it in shell history.
+- **Printing** it puts it in terminal scrollback, in any screen-share or screenshot,
+  and in the transcript of any coding agent that ran the command — not hypothetical
+  here; see the audit numbers in the next section.
 
-To rotate, re-run with `-Rotate` (PowerShell) to skip the confirmation. Rotating
-invalidates every existing view URL at once and leaves `AUTH_TOKEN` untouched.
+So the token lands in exactly two places: Cloudflare, and your clipboard.
+**Put it in your password manager.** Cloudflare stores secrets write-only — there is
+no reading one back, only replacing it.
 
-If you'd rather not run a script, `npx wrangler secret put VIEW_TOKEN --env production`
-prompts for the value without echoing it — you just have to generate it yourself
-(`openssl rand -base64 32`) and be careful about where that lands.
+Verification probes the route for a `200` rather than printing the value back, which
+is why a `404` afterwards is reported as *"redeploy the Worker"* instead of as a bad
+token: the script can prove the secret works without ever seeing it work.
+
+The script targets **Windows PowerShell 5.1**, the version that ships with Windows and
+the one `.cmd` launches. If you edit it, note that `RandomNumberGenerator::Fill` and
+`Invoke-WebRequest -SkipHttpErrorCheck` are PowerShell 7 / .NET Core only and throw
+here — the `RNGCryptoServiceProvider` and `WebException` handling are deliberate.
+
+Prefer to do it by hand? `npx wrangler secret put VIEW_TOKEN --env production` prompts
+without echoing; you just generate the value yourself (`openssl rand -base64 32`) and
+mind where it lands.
 
 ---
 
