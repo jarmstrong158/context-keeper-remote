@@ -318,10 +318,16 @@ $viewUrl = "$WorkerUrl/view/$token"
 # moment to propagate, so this retries rather than judging on one attempt.
 # No -SkipHttpErrorCheck: that is PowerShell 7 only, and on 5.1 a 4xx arrives as
 # a terminating WebException carrying the response.
-Write-Host "  verifying..." -NoNewline
+# 60 seconds, not 24. `wrangler secret put` does not merely store a value: it
+# creates a NEW Worker version and rolls it out, and until that reaches an edge
+# requests there are served by the PREVIOUS version holding the PREVIOUS token.
+# A correct token therefore 404s for a while (con-006), and a short window
+# reports a credential failure for a credential that is fine.
+Write-Host "  waiting for the new version to roll out (up to 60s)" -NoNewline
 $code = 0
-foreach ($attempt in 1..8) {
+foreach ($attempt in 1..20) {
     Start-Sleep -Seconds 3
+    Write-Host "." -NoNewline
     try {
         $resp = Invoke-WebRequest -Uri $viewUrl -Method Head -TimeoutSec 15 -UseBasicParsing
         $code = [int]$resp.StatusCode
@@ -337,9 +343,12 @@ if ($code -eq 200) {
     Write-Host " live (HTTP 200)" -ForegroundColor Green
 } elseif ($code -eq 404) {
     Write-Host " still 404" -ForegroundColor Yellow
-    Say "The secret is set, but the route is not answering. The likeliest cause"
-    Say "is a Worker deployed before the /view route existed -- redeploy, then"
-    Say "open the URL on your clipboard. Re-running this script is not needed."
+    Say "The secret is set, but the route did not answer within 60s. Two causes,"
+    Say "in likelihood order:"
+    Say "  1. the Worker has not been deployed since /view was added -- check that"
+    Say "     its Deploy workflow SUCCEEDED, filtering by workflow name, since"
+    Say "     gh run list alone returns CI rather than Deploy (con-005);"
+    Say "  2. an unusually slow rollout. Re-running is safe and cheap."
 } else {
     Write-Host " no answer (HTTP $code)" -ForegroundColor Yellow
     Say "The secret is set. Propagation can take a minute; try the URL shortly."

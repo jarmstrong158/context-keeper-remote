@@ -10,6 +10,12 @@ Streamable HTTP. It works as a **claude.ai custom connector**, including on mobi
 so your project's decisions and constraints are available from any Claude session —
 no PC left running, no tunnel.
 
+It also serves **[a phone app](#the-phone-view)** for reading that
+store yourself: install it to your home screen once and it opens with no login and
+no token in the URL. Tabs for recent activity, per-project counts, cambium
+knowledge, and store health — and tapping any entry gives you the full rationale,
+not just its title. Optional, opt-in, and on its own read-only credential.
+
 **Self-host your own copy in a few clicks with the button above** — Cloudflare
 copies this repo into your GitHub account, creates a fresh D1 database for you, and
 deploys the Worker. Then you add one secret and paste a URL into Claude. Full
@@ -110,133 +116,152 @@ call **`import_entries`**, pasting each file's contents:
 
 Incoming ids are preserved; existing ids are reported, never overwritten.
 
+### Step 5 — Install the phone view (optional)
+
+Everything above is the MCP connector, which is for Claude to read. Step 5 is for
+**you** to read it, from your phone. It needs a clone of this repo and Node 22+,
+which is the only part of the setup that touches a command line — the connector
+itself never does.
+
+See [the phone view](#the-phone-view) below.
+
 ---
 
-## The phone view (optional)
+## The phone view
 
-`GET /view/<VIEW_TOKEN>` serves a read-only, server-rendered page: every project,
-its active decisions and constraints, and — if `CAMBIUM_STATUS_URL` is set — the
-team/org knowledge counts from cambium-remote. It is built for glancing at on a
-phone, and it is the answer to "what did we decide?" when you are not at a machine.
+`/view` is a read-only, server-rendered page of every project's decisions and
+constraints. Install it to your home screen and it opens like an app: no login,
+no token in the URL, nothing to remember.
 
-Two properties are deliberate, and both are enforced in code:
+It has four tabs, matching the desktop dashboard:
 
-- **Its own credential.** The view runs on `VIEW_TOKEN`, never `AUTH_TOKEN`. Each
-  route refuses the other's token, so handing someone a view URL does not hand them
-  write access, and it can be rotated without touching any MCP connector.
-- **Unset means gone.** With no `VIEW_TOKEN`, `/view/<anything>` returns a bare
-  `404` — indistinguishable from a route that was never deployed. The feature is
-  opt-in by having a credential at all, so an unconfigured deploy has no extra
-  attack surface.
+| tab | what it answers |
+|---|---|
+| **Recent** | what changed lately, across every project |
+| **Projects** | per-project counts: entries, active, constraints, **scoped**, supersession links, stale, mojibake |
+| **Knowledge** | cambium's team/org counts, if wired (see below) |
+| **Health** | mojibake, thin rationale, untagged, stale — as proportions and a per-project ranking |
 
-`CAMBIUM_STATUS_URL` is optional and fails soft: if cambium-remote is slow (2.5s
-budget), down, or unset, the page still renders and says the knowledge counts are
-unavailable rather than erroring or hanging.
+Tap any row for the **full entry**: problem, why it was chosen, what was tried
+first, tradeoffs, alternatives with the reason each was rejected, and — for
+constraints — scope, hardness, and what enforces it. Search covers every field,
+including the reasoning, which is usually where the answer is. Superseded entries
+stay reachable, and each entry links to what it replaced and what replaced it.
 
-### Setting `VIEW_TOKEN`
+### Install
 
-**Double-click `scripts/set-view-token.cmd`.** That is the whole procedure, and it
-works from anywhere because the script relocates itself.
-
-From a terminal, use the absolute path — **not** `npm run`:
+**1. Create the credential.** Double-click `scripts/set-view-token.cmd`
+(macOS/Linux: `scripts/set-view-token.sh`). From a terminal use the absolute path
+— **not** `npm run`, which needs the repo as your current directory:
 
 ```bash
 powershell -NoProfile -ExecutionPolicy Bypass -File "/full/path/to/context-keeper-remote/scripts/set-view-token.ps1"
 ```
 
-`npm run` needs the repo to be your current directory. From anywhere else it
-fails with `npm error enoent Could not read package.json` — an error that names
-neither the script nor the directory, so it reads as the tool being broken when
-in fact nothing ran at all.
+One run generates the token, installs it, waits for the route to answer `200`,
+copies the URL, opens it in your browser, and prints a **QR code**.
 
-Two things about how that command is written, both of which cost real debugging
-time here:
+**2. Scan the QR with your phone**, then **Add to Home Screen**. Done.
 
-- **Forward slashes, even on Windows.** In bash — Git Bash, WSL, the shell behind
-  most "run this" buttons — a backslash is an **escape character**, so
-  `scripts\set-view-token.cmd` silently collapses to
-  `scriptsset-view-token.cmd: command not found`. It names a file nobody wrote, so
-  it reads as a broken script rather than a mangled path.
-- **`npm run` needs the repo as its working directory.** Run it from one directory
-  up and you get `npm error enoent Could not read package.json` wrapped in a
-  PowerShell `NativeCommandError` whose first line is `At line:1 char:1` — which
-  says nothing about directories and looks like the script crashed. It never ran.
-  The absolute-path form above has no such requirement.
+Add `-DryRun` to run everything except the install, which is the fastest way to
+check your setup before touching anything.
 
-Double-clicking `scripts/set-view-token.cmd` in Explorer works too. On macOS/Linux,
-`scripts/set-view-token.sh`.
+### How it stays logged in
 
-Add `-- -DryRun` to run everything except the install, which is the fastest way to
-confirm your environment is set up before touching anything:
+The token URL is an **enrolment** step, not a daily one. Visiting it sets a
+long-lived `HttpOnly` cookie, and from then on the bare `/view` path works from
+that device — which is what the home-screen icon opens.
 
-```bash
-powershell -NoProfile -ExecutionPolicy Bypass -File "/full/path/to/context-keeper-remote/scripts/set-view-token.ps1" -DryRun
-```
+- **Nothing is widened.** The cookie carries the same secret the path did and is
+  compared the same way, so rotating `VIEW_TOKEN` still revokes every device at
+  once. There is one revocation path, no session table, and no expiry to track.
+- **Its own credential.** The view never accepts `AUTH_TOKEN`, and `/mcp` never
+  accepts `VIEW_TOKEN`. A leaked view URL discloses decision summaries; it cannot
+  write, deprecate, or delete.
+- **Unset means gone.** With no `VIEW_TOKEN`, `/view/<anything>` returns a bare
+  `404`, indistinguishable from a route that was never deployed.
 
-One run generates the token, installs it, waits for the route to answer `200`, puts
-the URL on your clipboard, and opens it in your browser. On a fresh setup it asks
-nothing. The only prompt it will ever show is a confirmation when a `VIEW_TOKEN`
-already exists, since replacing one breaks every URL already in use — and `-Yes`
-(`CK_YES=1` for the shell version) skips even that.
+`npm run view` reopens it later (the URL is saved to `.view-url`, gitignored).
+`npm run view -- --qr` enrols another device **without** rotating the token —
+re-running setup would mint a new one and silently drop every device already
+added.
 
-It opens the browser on purpose, not as a flourish: once the URL is in history you
-can bookmark it or push it to your phone through browser sync, so a lost clipboard
-isn't a lost URL.
+### Connect the Knowledge tab to cambium-remote (optional)
 
-**What it refuses to do, and why.** The token is generated in-process and written to
-`wrangler secret put` over **stdin**, then displayed only as `abcd............wxyz`.
-Each of those matters, because a separate read-only credential is pointless if
-installing it leaks it:
-
-- Passing a secret as an **argument** puts it in shell history *and in the process
-  list*, readable by any other user on the machine for the duration of the call.
-- **Echoing** it into a pipe puts it in shell history.
-- **Printing** it puts it in terminal scrollback, in any screen-share or screenshot,
-  and in the transcript of any coding agent that ran the command — not hypothetical
-  here; see the audit numbers in the next section.
-
-So the token lands in exactly two places: Cloudflare, and your clipboard.
-**Put it in your password manager.** Cloudflare stores secrets write-only — there is
-no reading one back, only replacing it.
-
-Verification probes the route for a `200` rather than printing the value back, which
-is why a `404` afterwards is reported as *"redeploy the Worker"* instead of as a bad
-token: the script can prove the secret works without ever seeing it work.
-
-**Self-hosters: set your URL once.** No wrangler command reports the `workers.dev`
-host — not `whoami`, `deployments list`, `versions list`, or `deployments status` —
-so it lives in `package.json`:
+Only relevant if you also run [cambium-remote](https://github.com/jarmstrong158/cambium-remote).
 
 ```bash
-node -e "const p=require('./package.json');p.contextKeeper.workerUrl='https://<worker>.<account>.workers.dev';require('fs').writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
+scripts/connect-cambium.cmd
 ```
 
-The script reads it **before** installing anything, and refuses to run without it.
-That ordering is deliberate: a token installed without a URL to put it in is
-unrecoverable, since Cloudflare can't read a secret back. Failing before the write
-costs nothing; failing after costs the token.
+It generates a **status-only** credential, installs it on cambium-remote as
+`STATUS_TOKEN`, verifies the route answers with real counts, and only then sets
+`CAMBIUM_STATUS_URL` here. Nothing to look up or paste.
 
-### Editing the script
+**Why a second credential rather than cambium's connector URL:** that URL is
+cambium-remote's `AUTH_TOKEN`, which grants `recall` over every promoted item —
+on the Worker whose team scope reaches every repo under `TEAM_OWNER`, including
+private ones. Copying it here to render three integers would mean a leak of this
+Worker discloses cambium's entire reach. `STATUS_TOKEN` reads the counts and
+nothing else. It is also *generatable*, which is what makes the setup automatic;
+`AUTH_TOKEN` can only ever be re-typed by hand, since Cloudflare stores secrets
+write-only.
 
-It targets **Windows PowerShell 5.1** — the version that ships with Windows and the
-one `.cmd` launches. Three things there are load-bearing and look like they could be
-modernized:
+**Self-hosters must add a service binding.** A Worker **cannot** reach another
+Worker by fetching its `workers.dev` hostname — Cloudflare's edge answers `404`
+and the target never runs, which looks exactly like a rejected token. Add to your
+`wrangler.toml`:
 
-- `RNGCryptoServiceProvider`, not `RandomNumberGenerator::Fill` — the latter doesn't
-  exist on .NET Framework and throws.
-- Manual `WebException` status extraction, not `-SkipHttpErrorCheck` — that parameter
-  is PowerShell 7 only.
+```toml
+[[services]]
+binding = "CAMBIUM"
+service = "cambium-remote"
+```
+
+This repo declares it only under `[env.production]`, deliberately: a service
+binding names its target, so declaring it at the top level would break the
+one-click deploy for anyone whose account has no `cambium-remote`.
+
+The panel fails soft. If cambium is slow (10s budget), down, or unwired, the page
+still renders and says so. Only the Knowledge tab makes that call, so the other
+tabs never pay for it.
+
+### Set your Worker URL (self-hosters)
+
+No wrangler command reports the `workers.dev` host — not `whoami`,
+`deployments list`, `versions list`, or `deployments status` — so it lives in
+`package.json`:
+
+```bash
+node -e "const p=require('./package.json');p.contextKeeper.workerUrl='https://<worker>.<account>.workers.dev';require('fs').writeFileSync('package.json',JSON.stringify(p,null,2)+'
+')"
+```
+
+The setup script reads it **before** installing anything and refuses to run
+without it. That ordering is deliberate: a token installed with no URL to put it
+in is unrecoverable, since Cloudflare cannot read a secret back.
+
+### Editing the setup scripts
+
+They target **Windows PowerShell 5.1** — the version that ships with Windows and
+the one `.cmd` launches. Five things there are load-bearing and look like they
+could be modernised:
+
+- `RNGCryptoServiceProvider`, not `RandomNumberGenerator::Fill` — the latter is
+  .NET Core only and throws.
+- Manual `WebException` status extraction, not `-SkipHttpErrorCheck` — PowerShell 7 only.
+- No `??`, `?.`, or ternaries — all PowerShell 7 only, and a **parse error** here.
 - Every wrangler call goes through `Invoke-Wrangler`. On 5.1, `2>&1` on a *native*
   command wraps each stderr line in an ErrorRecord, and under
-  `$ErrorActionPreference = 'Stop'` the first one is **terminating** — so an ordinary
-  wrangler notice kills the run. The helper drops to `Continue` for the call and
-  restores it after, which is what turns stderr back into data.
+  `$ErrorActionPreference = 'Stop'` the first is **terminating** — so an ordinary
+  wrangler notice kills the run.
+- Confirmations gate on `[Console]::IsInputRedirected`, never
+  `[Environment]::UserInteractive` (which is always true), and cast `Read-Host` to
+  `[string]` before matching — `$null -notmatch '...'` evaluates to *empty*, not
+  `$true`, so the obvious guard fails **open**.
 
-Prefer to do it by hand? `npx wrangler secret put VIEW_TOKEN --env production` prompts
-without echoing; you just generate the value yourself (`openssl rand -base64 32`) and
-mind where it lands.
-
----
+Every run writes a scrubbed log (`.view-setup.log`, `.cambium-setup.log`) with the
+token masked, so a failure can be read after the window closes.
 
 ## ⚠️ Security: the connector URL is a credential
 
@@ -356,6 +381,18 @@ itself.
   keeps hitting the same database and the same URL. Self-hosters never touch this
   env.
 
+The **cambium service binding lives only in `[env.production]`**, and that split is
+load-bearing rather than tidy. A service binding names its target Worker, so a
+top-level `[[services]] service = "cambium-remote"` would make the one-click deploy
+fail in any account that has no such Worker — which is every account but the
+maintainer's. Anything that names another Worker, another database by id, or
+another account belongs in the named env for the same reason.
+
+Named environments **inherit nothing**. Every binding the production deploy needs
+has to be repeated under `[env.production.*]`, including `[observability]`. A
+binding that exists only at the top level is silently absent from the env CI
+actually deploys.
+
 ### Deploy pipeline (maintainer only)
 
 `.github/workflows/deploy.yml` runs on push to `main`, and is gated with
@@ -397,10 +434,18 @@ src/mcp.ts               stateless Streamable HTTP MCP server (createMcpHandler)
 src/db.ts                D1 access + runtime migration runner + id generation
 src/entries.ts           payload normalization, insert-with-retry, keyword scoring
 src/tools/*.ts           one module per tool group
+src/view.ts              the phone view: shell, tabs, knowledge panel, dispatch on ?e/?p/?q/?t
+src/detail.ts            entry detail, project drill-down, search, supersession trail
+src/health.ts            quality flags + the Projects and Health tables
+src/install.ts           enrolment cookie, web app manifest, home-screen icon
+src/icon-data.ts         GENERATED by scripts/make-icon.mjs -- do not hand-edit
 schema.sql               reference copy of the DDL the migration runner embeds
 wrangler.toml            default (auto-provision) + [env.production] (pinned) config
 .github/workflows/deploy.yml   test-then-deploy on push to main (maintainer repo)
 scripts/smoke-test.mjs   live JSON-RPC round-trip check
+scripts/set-view-token.*  create VIEW_TOKEN, verify, QR, save the URL  (.cmd = double-click)
+scripts/connect-cambium.* generate STATUS_TOKEN on cambium-remote and wire it here
+scripts/make-icon.mjs     regenerate the home-screen PNG (npm run make-icon)
 test/                    vitest suite (local workerd D1, no network)
 ```
 

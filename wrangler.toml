@@ -23,21 +23,19 @@ database_name = "context-keeper"
 
 
 # --- cambium-remote service binding ----------------------------------------
-# The Knowledge panel reads cambium-remote's /status route. It CANNOT do that
-# with a plain fetch to https://cambium-remote.<account>.workers.dev: Cloudflare
-# does not route a Worker subrequest to a workers.dev hostname, and the edge
-# answers 404 without the target Worker ever running. That failure is
-# indistinguishable from "wrong token" from the caller's side -- the target's
-# own logs show no request at all, which is the only way to tell.
+# NOT declared at the top level, on purpose.
 #
-# A service binding is the supported mechanism. It dispatches in-process, so
-# there is no DNS, no TLS, no egress, and no extra latency. The request still
-# arrives at cambium-remote's normal fetch handler and is still checked against
-# STATUS_TOKEN, so the credential separation is unchanged -- the binding
-# replaces the transport, not the authorization.
-[[services]]
-binding = "CAMBIUM"
-service = "cambium-remote"
+# The top-level config is what the "Deploy to Cloudflare" button uses, and it
+# runs in an account that has no cambium-remote Worker. A service binding names
+# its target, so declaring one here would make the one-click self-host deploy
+# fail on a Worker the deployer has never heard of -- breaking the headline
+# feature of this repo for everyone except its maintainer.
+#
+# It therefore lives only under [env.production] below, which is the
+# maintainer's own deploy. Self-hosters who ALSO run cambium-remote can add the
+# same two lines; see the README. Without it, CAMBIUM_STATUS_URL is simply
+# unset and the Knowledge tab states that it is not connected, which is the
+# correct behaviour for a deployment that has no cambium.
 
 # --- production env (this repo's own CI) -----------------------------------
 # The maintainer's GitHub Actions deploy runs `wrangler deploy --env production`

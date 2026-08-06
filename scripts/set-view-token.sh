@@ -111,10 +111,17 @@ VIEW_URL="$WORKER_URL/view/$TOKEN"
 
 # Proves the secret took effect without ever rendering it. Cloudflare needs a
 # moment to propagate, so this retries rather than judging on one attempt.
-printf '  verifying...'
+# 60 seconds, not 24. `wrangler secret put` does not merely store a value: it
+# creates a NEW Worker version and rolls it out. Until that reaches an edge,
+# requests there are served by the PREVIOUS version holding the PREVIOUS token,
+# so a correct token legitimately 404s for a while (con-006). A short window
+# reports a credential failure for a credential that is fine, and the natural
+# next move -- regenerating, redeploying -- chases nothing.
+printf '  waiting for the new version to roll out (up to 60s)'
 CODE=0
-for _ in 1 2 3 4 5 6 7 8; do
+for _ in $(seq 1 20); do
   sleep 3
+  printf '.'
   CODE="$(curl -s -o /dev/null -m 15 -w '%{http_code}' -I "$VIEW_URL" || echo 0)"
   [ "$CODE" = "200" ] && break
 done
@@ -122,12 +129,17 @@ if [ "$CODE" = "200" ]; then
   printf ' live (HTTP 200)\n'
 elif [ "$CODE" = "404" ]; then
   printf ' still 404\n'
-  say "The secret is set, but the route is not answering. The likeliest cause is"
-  say "a Worker deployed before the /view route existed -- redeploy, then open"
-  say "the URL below. Re-running this script is not needed."
+  say "The secret is set, but the route did not answer within 60s. Two causes,"
+  say "in likelihood order:"
+  say "  1. the Worker has not been deployed since /view was added -- check that"
+  say "     its Deploy workflow SUCCEEDED, filtering by workflow name, since"
+  say "     gh run list alone returns CI rather than Deploy;"
+  say "  2. an unusually slow rollout. Re-running is safe and cheap."
 else
   printf ' no answer (HTTP %s)\n' "$CODE"
-  say "The secret is set. Propagation can take a minute; try the URL shortly."
+  say "The secret is set, but the route did not answer within 60s. Two causes:"
+  say "  1. the Worker has not been deployed since /view was added; or"
+  say "  2. an unusually slow rollout -- re-running is safe and cheap."
 fi
 
 COPIED=""
@@ -137,28 +149,42 @@ for c in pbcopy "xclip -selection clipboard" "xsel --clipboard --input" wl-copy 
   fi
 done
 
+# Saved to disk so nobody has to remember it, and so `npm run view` can reopen
+# it. Cloudflare stores secrets write-only, so if the clipboard were the only
+# copy, one stray Ctrl-C would mean re-running setup and dropping every enrolled
+# device. Every CLI keeps its own token on disk -- npm, gh, aws, wrangler --
+# and it is strictly better than asking a person to hold 43 characters.
+#
+# umask sets the mode at creation so there is no window where the file is
+# world-readable; the explicit chmod is the belt to those suspenders, since
+# umask is inherited and a caller can have loosened it.
+OUT="$(dirname "${BASH_SOURCE[0]}")/../.view-url"
+( umask 077; printf '%s' "$VIEW_URL" > "$OUT" )
+chmod 600 "$OUT" 2>/dev/null || true
+
 printf '\n  done.\n'
 say "token : $MASK   (32 bytes; never printed in full)"
 say "url   : ${WORKER_URL%/}/view/$MASK"
+say "Saved (mode 600). Reopen it any time with: npm run view"
 if [ -n "$COPIED" ]; then
   printf '  The full URL is on your clipboard.\n'
 else
-  # Headless box, no clipboard. Printing it would put the credential in
-  # scrollback -- which is one of the three leak channels this whole script
-  # exists to avoid, and the worst of them, since scrollback is what gets
-  # screen-shared, screenshotted, and captured by agent transcripts. A
-  # mode-600 file is access-controlled and deliberate instead, and the user
-  # decides when to read it and when it stops existing.
-  OUT=".view-url"
-  # umask sets the mode at creation so there is no window where the file is
-  # world-readable; the explicit chmod is the belt to that suspenders, because
-  # umask is inherited and a caller can have loosened it.
-  ( umask 077; printf '%s\n' "$VIEW_URL" > "$OUT" )
-  chmod 600 "$OUT" 2>/dev/null || true
-  printf '  No clipboard tool found, so the URL was written to %s (mode 600)\n' "$OUT"
-  printf '  rather than printed -- terminal scrollback is exactly the leak this\n'
-  printf '  script avoids. Read it, save it, then delete it:\n\n'
-  printf '      cat %s && rm %s\n' "$OUT" "$OUT"
+  # No clipboard on this box. Printing it would put the credential in
+  # scrollback -- the worst of the three leak channels this script exists to
+  # avoid, since scrollback is what gets screen-shared, screenshotted, and
+  # captured by agent transcripts. The saved file is access-controlled and
+  # deliberate instead, and you decide when to read it.
+  printf '  No clipboard tool found; read it from the saved file when you need it.\n'
+fi
+
+# The QR is what makes this install-once on a phone: the alternative is
+# transferring 43 characters by hand, which is friction AND a new place the
+# credential lives. Piped over stdin, never argv (the process list is readable
+# by other users), matching the rest of this script.
+if [ "$CODE" = "200" ] && command -v node >/dev/null 2>&1; then
+  printf '\n  Scan this with your phone camera, then Add to Home Screen:\n\n'
+  printf '%s' "$VIEW_URL" | node "$(dirname "${BASH_SOURCE[0]}")/show-qr.mjs" 2>/dev/null \
+    || printf '  (QR unavailable -- run npm install, or use the clipboard URL)\n'
 fi
 
 # Once it is in browser history you can bookmark it or push it to your phone
